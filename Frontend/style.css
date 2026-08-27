@@ -417,6 +417,24 @@ select.input { appearance: auto; }
 
 .hidden { display: none !important; }
 
+/* ---------- Predictive Capacity Alerts ---------- */
+.badge-critical { background: var(--danger-bg); color: var(--danger); border-color: var(--danger-border); }
+.badge-warning { background: var(--warning-bg); color: var(--warning); border-color: var(--warning-border); }
+.badge-ok { background: var(--success-bg); color: var(--success); border-color: var(--success-border); }
+
+.alert-list { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.alert-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; gap: 14px;
+}
+.alert-card.alert-critical { border-left: 4px solid var(--danger); }
+.alert-card.alert-warning { border-left: 4px solid var(--warning); }
+.alert-card.alert-ok { border-left: 4px solid var(--success); opacity: 0.85; }
+.alert-left { display: flex; flex-direction: column; gap: 4px; }
+.alert-title { font-weight: 700; font-size: 0.95rem; color: var(--text); }
+.alert-msg { font-size: 0.88rem; color: var(--text-muted); }
+.alert-meta { font-size: 0.8rem; font-family: var(--font-mono); color: var(--text-faint); }
+
 /* =========================================================
    Responsive
    ========================================================= */

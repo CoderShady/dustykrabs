@@ -51,6 +51,172 @@ const NAME_POOL = [
   'Amit Chakraborty', 'Ritu Agarwal', 'Suresh Pillai', 'Kavita Joshi', 'Farhan Ahmed',
 ];
 
+/* ================= BACKEND API & WEBSOCKET ================= */
+
+const API_BASE = window.location.origin.includes(':8000') || window.location.pathname.startsWith('/api')
+  ? '/api'
+  : 'http://localhost:8000/api';
+const WS_HOST = window.location.host.includes(':8000') ? window.location.host : 'localhost:8000';
+const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${WS_HOST}/ws`;
+
+let BACKEND_ACTIVE = false;
+let ws = null;
+
+async function checkBackend() {
+  try {
+    const res = await fetch(`${API_BASE}/health`, { cache: 'no-store' });
+    if (res.ok) {
+      BACKEND_ACTIVE = true;
+      const logoText = document.querySelector('.logo-text');
+      if (logoText && !document.getElementById('backend-status-badge')) {
+        const badge = document.createElement('span');
+        badge.id = 'backend-status-badge';
+        badge.style.cssText = 'font-size:0.75rem; color:var(--primary-darker); background:var(--primary-light); padding:2px 8px; border-radius:999px; font-weight:600; margin-left:8px;';
+        badge.textContent = '● M/M/c Engine Online';
+        logoText.parentNode.appendChild(badge);
+      }
+      await syncFromBackend();
+      initWebSocket();
+      renderCurrentView();
+      return true;
+    }
+  } catch (e) {
+    console.log('Backend not reachable, running in standalone client mode.');
+  }
+  BACKEND_ACTIVE = false;
+  return false;
+}
+
+async function syncFromBackend() {
+  if (!BACKEND_ACTIVE) return;
+  try {
+    const res = await fetch(`${API_BASE}/hospitals`);
+    if (!res.ok) return;
+    const hospSummaries = await res.json();
+
+    for (const hs of hospSummaries) {
+      let h = getHospital(hs.id);
+      if (!h) {
+        h = { id: hs.id, name: hs.name, location: hs.location, departments: [], beds: [] };
+        HOSPITALS.push(h);
+      }
+      const dRes = await fetch(`${API_BASE}/hospitals/${h.id}`);
+      if (dRes.ok) {
+        const detail = await dRes.json();
+        for (const ds of detail.departments) {
+          let dept = h.departments.find(d => d.id === ds.id);
+          if (!dept) {
+            dept = { id: ds.id, name: ds.name, prefix: ds.prefix, avgServiceTime: 6, counter: 0, queue: [], currentTokenId: null, completedCount: 0 };
+            h.departments.push(dept);
+          }
+          dept.numCounters = ds.num_counters;
+          const tRes = await fetch(`${API_BASE}/hospitals/${h.id}/departments/${dept.id}/trail`);
+          if (tRes.ok) {
+            const trail = await tRes.json();
+            dept.queue = [];
+            dept.currentTokenId = null;
+            trail.forEach(item => {
+              TOKENS[item.id] = {
+                id: item.id,
+                number: item.number,
+                hospitalId: h.id,
+                departmentId: dept.id,
+                patientName: item.patient_name,
+                status: item.is_current ? 'called' : 'waiting',
+              };
+              if (item.is_current) {
+                dept.currentTokenId = item.id;
+              } else {
+                dept.queue.push(item.id);
+              }
+            });
+          }
+        }
+      }
+
+      const bRes = await fetch(`${API_BASE}/hospitals/${h.id}/beds`);
+      if (bRes.ok) {
+        const beds = await bRes.json();
+        h.beds = beds.map(b => ({
+          id: b.id,
+          number: b.number,
+          status: b.status,
+          patientName: b.patient_name,
+        }));
+      }
+    }
+
+    const tokRes = await fetch(`${API_BASE}/tokens?limit=50`);
+    if (tokRes.ok) {
+      const recentToks = await tokRes.json();
+      recentToks.forEach(t => {
+        TOKENS[t.id] = {
+          id: t.id,
+          number: t.number,
+          hospitalId: t.hospital_id,
+          departmentId: t.department_id,
+          patientName: t.patient_name,
+          age: t.age,
+          gender: t.gender,
+          phone: t.phone,
+          status: t.status,
+          createdAt: new Date(t.created_at).getTime(),
+          calledAt: t.called_at ? new Date(t.called_at).getTime() : null,
+          resolvedAt: t.resolved_at ? new Date(t.resolved_at).getTime() : null,
+          ahead: t.ahead,
+          wait: t.wait_minutes,
+        };
+      });
+    }
+
+    if (state.myToken) {
+      const myRes = await fetch(`${API_BASE}/tokens/${state.myToken.id}`);
+      if (myRes.ok) {
+        const mt = await myRes.json();
+        TOKENS[mt.id] = {
+          ...TOKENS[mt.id],
+          status: mt.status,
+          ahead: mt.ahead,
+          wait: mt.wait_minutes,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('Backend sync failed:', err);
+  }
+}
+
+function initWebSocket() {
+  if (!BACKEND_ACTIVE) return;
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+  try {
+    ws = new WebSocket(WS_URL);
+    ws.onmessage = async (msg) => {
+      try {
+        const event = JSON.parse(msg.data);
+        if (event.event === 'patient_alert') {
+          if (state.myToken && event.data.token_id === state.myToken.id) {
+            showToast('🔔 ' + event.data.message, 'warning');
+          }
+        } else if (event.event === 'token_called') {
+          if (state.myToken && event.data.token_id === state.myToken.id) {
+            showToast(`📢 Token ${event.data.token_number} called to counter!`, 'warning');
+          }
+        }
+        await syncFromBackend();
+        renderCurrentView();
+      } catch (e) {
+        console.error('Error in WS onmessage:', e);
+      }
+    };
+    ws.onclose = () => {
+      if (BACKEND_ACTIVE) setTimeout(initWebSocket, 3000);
+    };
+  } catch (e) {
+    console.warn('WebSocket error:', e);
+  }
+}
+
 /* ================= HELPERS ================= */
 
 let _uidCounter = 1;
@@ -255,6 +421,7 @@ function renderHospitalDetail() {
         <div class="stat-row">
           <span>Waiting: <strong>${size}</strong></span>
           <span>Est. wait: <strong>${formatWait(wait)}</strong></span>
+          <span>Counters: <strong>${d.numCounters || 1}</strong></span>
         </div>
         ${renderQueueTrail(d)}
         <button class="btn btn-primary" data-action="get-token" data-hospital-id="${hospital.id}" data-department-id="${d.id}">Get Token</button>
@@ -445,14 +612,67 @@ function renderBedGrid() {
     </button>`).join('');
 }
 
-function renderAdminStats() {
+async function renderAdminStats() {
   const scope = document.getElementById('admin-hospital').value;
   state.staff.admin.hospitalId = scope;
+
+  if (BACKEND_ACTIVE) {
+    try {
+      const [statsRes, alertsRes] = await Promise.all([
+        fetch(`${API_BASE}/admin/stats?scope=${encodeURIComponent(scope)}`),
+        fetch(`${API_BASE}/admin/alerts${scope !== 'all' ? `?hospital_id=${encodeURIComponent(scope)}` : ''}`),
+      ]);
+      if (statsRes.ok && alertsRes.ok) {
+        const stats = await statsRes.json();
+        const alerts = await alertsRes.json();
+
+        let alertsHtml = '';
+        if (alerts && alerts.length) {
+          const cards = alerts.map(a => `
+            <div class="alert-card alert-${a.severity}">
+              <div class="alert-left">
+                <div class="alert-title">${escapeHtml(a.department_name)} · ${escapeHtml(a.hospital_name)}</div>
+                <div class="alert-msg">${escapeHtml(a.message)}</div>
+                <div class="alert-meta">Queue: ${a.current_queue_len} / ${a.capacity_threshold} | Net growth: ${a.net_growth_per_hour > 0 ? '+' : ''}${a.net_growth_per_hour}/hr${a.eta_hours !== null ? ` | ETA to overflow: ~${a.eta_hours}h` : ''}</div>
+              </div>
+              <span class="badge badge-${a.severity}">${a.severity.toUpperCase()}</span>
+            </div>
+          `).join('');
+          alertsHtml = `
+            <div class="alerts-section" style="margin-top:28px;">
+              <h3 style="margin-bottom:4px;">Predictive Capacity Alerts</h3>
+              <p class="section-sub" style="margin-bottom:12px;">Analytical M/M/c arrival rate vs service rate projection (early warning)</p>
+              <div class="alert-list">${cards}</div>
+            </div>`;
+        }
+
+        document.getElementById('admin-stats').innerHTML = `
+          <div class="stat-cards">
+            <div class="stat-card"><span class="sc-num">${stats.total_waiting}</span><span class="sc-lbl">Patients waiting</span></div>
+            <div class="stat-card"><span class="sc-num">${formatWait(stats.avg_wait_minutes)}</span><span class="sc-lbl">Average wait time</span></div>
+            <div class="stat-card"><span class="sc-num">${stats.available_beds} / ${stats.total_beds}</span><span class="sc-lbl">Beds available</span></div>
+            <div class="stat-card"><span class="sc-num">${stats.busiest_department ? escapeHtml(stats.busiest_department) : '—'}</span><span class="sc-lbl">Busiest department</span></div>
+            <div class="stat-card"><span class="sc-num">${stats.avg_utilization}</span><span class="sc-lbl">Traffic intensity (ρ)</span></div>
+          </div>
+          <div class="bed-bar-wrap">
+            <h3 style="margin-bottom:2px;">Bed Occupancy</h3>
+            <div class="bed-bar-track"><div class="bed-bar-fill" style="width:${stats.occupied_pct}%"></div></div>
+            <div class="bed-bar-legend"><span>${stats.occupied_beds} occupied</span><span>${stats.occupied_pct}%</span><span>${stats.available_beds} available</span></div>
+          </div>
+          ${alertsHtml}`;
+        return;
+      }
+    } catch (e) {
+      console.error('Failed to load admin stats from API:', e);
+    }
+  }
+
   const hospitals = scope === 'all' ? HOSPITALS : [getHospital(scope)];
 
   let totalWaiting = 0, waitSum = 0, waitCount = 0, totalBeds = 0, occupiedBeds = 0, busiest = null;
 
   hospitals.forEach(h => {
+    if (!h) return;
     h.departments.forEach(d => {
       const size = d.queue.length + (d.currentTokenId ? 1 : 0);
       totalWaiting += size;
@@ -553,11 +773,44 @@ function hideConfirm() {
 
 /* ================= STAFF ACTIONS ================= */
 
-function callNextToken(hospitalId, departmentId) {
+async function callNextToken(hospitalId, departmentId) {
   const dept = getDept(hospitalId, departmentId);
-  if (!dept || dept.currentTokenId || !dept.queue.length) return;
+  if (!dept) return;
+
   showLoadingOverlay('Updating queue…');
+
+  if (BACKEND_ACTIVE) {
+    try {
+      const res = await fetch(`${API_BASE}/departments/${departmentId}/call-next`, { method: 'POST' });
+      if (res.ok) {
+        const nextTok = await res.json();
+        TOKENS[nextTok.id] = {
+          ...TOKENS[nextTok.id],
+          status: 'called',
+          calledAt: Date.now(),
+        };
+        dept.currentTokenId = nextTok.id;
+        await syncFromBackend();
+        hideLoadingOverlay();
+        renderQueueMgmt();
+        showToast(`Now calling ${nextTok.number}`, 'info');
+        return;
+      } else {
+        const err = await res.json();
+        hideLoadingOverlay();
+        showToast(err.detail || 'Could not call next patient.', 'warning');
+        return;
+      }
+    } catch (e) {
+      console.error('API call-next error:', e);
+    }
+  }
+
   setTimeout(() => {
+    if (dept.currentTokenId || !dept.queue.length) {
+      hideLoadingOverlay();
+      return;
+    }
     const nextId = dept.queue.shift();
     dept.currentTokenId = nextId;
     getToken(nextId).status = 'called';
@@ -567,11 +820,42 @@ function callNextToken(hospitalId, departmentId) {
   }, 350);
 }
 
-function resolveCurrentToken(hospitalId, departmentId, newStatus, toastMsg) {
+async function resolveCurrentToken(hospitalId, departmentId, newStatus, toastMsg) {
   const dept = getDept(hospitalId, departmentId);
-  if (!dept || !dept.currentTokenId) return;
+  if (!dept) return;
+
   showLoadingOverlay('Updating queue…');
+
+  if (BACKEND_ACTIVE) {
+    try {
+      const res = await fetch(`${API_BASE}/departments/${departmentId}/resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (res.ok) {
+        dept.currentTokenId = null;
+        await syncFromBackend();
+        hideLoadingOverlay();
+        renderQueueMgmt();
+        showToast(toastMsg, newStatus === 'completed' ? 'success' : 'info');
+        return;
+      } else {
+        const err = await res.json();
+        hideLoadingOverlay();
+        showToast(err.detail || 'Could not resolve patient.', 'warning');
+        return;
+      }
+    } catch (e) {
+      console.error('API resolve error:', e);
+    }
+  }
+
   setTimeout(() => {
+    if (!dept.currentTokenId) {
+      hideLoadingOverlay();
+      return;
+    }
     const t = getToken(dept.currentTokenId);
     t.status = newStatus;
     t.resolvedAt = Date.now();
@@ -606,34 +890,77 @@ function toggleBedPatientField() {
   document.getElementById('bed-patient-field').style.display = status === 'occupied' ? 'flex' : 'none';
 }
 
-function saveBedChanges() {
+async function saveBedChanges() {
   if (!state.modalBed) return;
   const { hospitalId, bedId } = state.modalBed;
-  const bed = getHospital(hospitalId).beds.find(b => b.id === bedId);
   const newStatus = document.getElementById('bed-status-select').value;
   const patientName = document.getElementById('bed-patient-name').value.trim();
   showLoadingOverlay('Updating bed status…');
+
+  if (BACKEND_ACTIVE) {
+    try {
+      const res = await fetch(`${API_BASE}/beds/${bedId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus, patient_name: patientName }),
+      });
+      if (res.ok) {
+        await syncFromBackend();
+        hideLoadingOverlay();
+        closeBedModal();
+        renderBedGrid();
+        showToast(`Bed updated to ${capitalize(newStatus)}.`, 'success');
+        return;
+      }
+    } catch (e) {
+      console.error('API save bed error:', e);
+    }
+  }
+
   setTimeout(() => {
-    bed.status = newStatus;
-    bed.patientName = newStatus === 'occupied' ? (patientName || 'Unnamed patient') : '';
+    const bed = getHospital(hospitalId).beds.find(b => b.id === bedId);
+    if (bed) {
+      bed.status = newStatus;
+      bed.patientName = newStatus === 'occupied' ? (patientName || 'Unnamed patient') : '';
+    }
     hideLoadingOverlay();
     closeBedModal();
     renderBedGrid();
-    showToast(`Bed ${bed.number} updated to ${capitalize(newStatus)}.`, 'success');
+    showToast(`Bed updated to ${capitalize(newStatus)}.`, 'success');
   }, 350);
 }
-function releaseBed() {
+
+async function releaseBed() {
   if (!state.modalBed) return;
   const { hospitalId, bedId } = state.modalBed;
-  const bed = getHospital(hospitalId).beds.find(b => b.id === bedId);
   showLoadingOverlay('Updating bed status…');
+
+  if (BACKEND_ACTIVE) {
+    try {
+      const res = await fetch(`${API_BASE}/beds/${bedId}/release`, { method: 'POST' });
+      if (res.ok) {
+        await syncFromBackend();
+        hideLoadingOverlay();
+        closeBedModal();
+        renderBedGrid();
+        showToast('Bed released and marked available.', 'success');
+        return;
+      }
+    } catch (e) {
+      console.error('API release bed error:', e);
+    }
+  }
+
   setTimeout(() => {
-    bed.status = 'available';
-    bed.patientName = '';
+    const bed = getHospital(hospitalId).beds.find(b => b.id === bedId);
+    if (bed) {
+      bed.status = 'available';
+      bed.patientName = '';
+    }
     hideLoadingOverlay();
     closeBedModal();
     renderBedGrid();
-    showToast(`Bed ${bed.number} released and marked available.`, 'success');
+    showToast('Bed released and marked available.', 'success');
   }, 350);
 }
 
@@ -685,13 +1012,26 @@ function nextBedStatus(current) {
   return cycle[current] || 'available';
 }
 
-function simulationTick() {
+async function simulationTick() {
+  if (BACKEND_ACTIVE) {
+    try {
+      await fetch(`${API_BASE}/simulation/tick`, { method: 'POST' });
+      await syncFromBackend();
+      renderCurrentView();
+      return;
+    } catch (e) {
+      console.warn('API simulation tick failed:', e);
+    }
+  }
+
   // 1. Occasionally add a new patient to a random department queue
   if (Math.random() < 0.5) {
     const hospital = HOSPITALS[Math.floor(Math.random() * HOSPITALS.length)];
-    const dept = hospital.departments[Math.floor(Math.random() * hospital.departments.length)];
-    if (dept.queue.length < 12) {
-      createToken(hospital.id, dept.id, randomName(), randomAge(), randomGender(), randomPhone());
+    if (hospital && hospital.departments.length) {
+      const dept = hospital.departments[Math.floor(Math.random() * hospital.departments.length)];
+      if (dept.queue.length < 12) {
+        createToken(hospital.id, dept.id, randomName(), randomAge(), randomGender(), randomPhone());
+      }
     }
   }
 
@@ -785,7 +1125,7 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   // Patient: token form submit
-  document.getElementById('token-form').addEventListener('submit', function (e) {
+  document.getElementById('token-form').addEventListener('submit', async function (e) {
     e.preventDefault();
     const name = document.getElementById('tf-name').value.trim();
     const age = document.getElementById('tf-age').value;
@@ -804,8 +1144,54 @@ document.addEventListener('DOMContentLoaded', function () {
     const submitBtn = document.getElementById('tf-submit');
     setBtnBusy(submitBtn, true);
     showLoadingOverlay('Generating your token…');
+
+    const hospitalId = state.tokenFormContext.hospitalId;
+
+    if (BACKEND_ACTIVE) {
+      try {
+        const res = await fetch(`${API_BASE}/tokens`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            hospital_id: hospitalId,
+            department_id: departmentId,
+            patient_name: name,
+            age: Number(age),
+            gender: gender,
+            phone: phone,
+          }),
+        });
+        if (res.ok) {
+          const token = await res.json();
+          TOKENS[token.id] = {
+            id: token.id,
+            number: token.number,
+            hospitalId: token.hospital_id,
+            departmentId: token.department_id,
+            patientName: token.patient_name,
+            age: token.age,
+            gender: token.gender,
+            phone: token.phone,
+            status: token.status,
+            createdAt: new Date(token.created_at).getTime(),
+            ahead: token.ahead,
+            wait: token.wait_minutes,
+          };
+          state.myToken = { id: token.id, hospitalId, departmentId };
+          await syncFromBackend();
+          hideLoadingOverlay();
+          setBtnBusy(submitBtn, false);
+          renderTokenResult(token);
+          navigateTo('token-result');
+          showToast(`Token generated: ${token.number}`, 'success');
+          return;
+        }
+      } catch (err) {
+        console.error('API create token error:', err);
+      }
+    }
+
     setTimeout(() => {
-      const hospitalId = state.tokenFormContext.hospitalId;
       const token = createToken(hospitalId, departmentId, name, age, gender, phone);
       state.myToken = { id: token.id, hospitalId, departmentId };
       hideLoadingOverlay();
@@ -817,7 +1203,7 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   // Staff: register patient
-  document.getElementById('register-form').addEventListener('submit', function (e) {
+  document.getElementById('register-form').addEventListener('submit', async function (e) {
     e.preventDefault();
     const hospitalId = document.getElementById('reg-hospital').value;
     const departmentId = document.getElementById('reg-department').value;
@@ -837,6 +1223,50 @@ document.addEventListener('DOMContentLoaded', function () {
     const btn = document.getElementById('reg-submit');
     setBtnBusy(btn, true);
     showLoadingOverlay('Generating token…');
+
+    if (BACKEND_ACTIVE) {
+      try {
+        const res = await fetch(`${API_BASE}/tokens`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            hospital_id: hospitalId,
+            department_id: departmentId,
+            patient_name: name,
+            age: Number(age),
+            gender: gender,
+            phone: phone,
+          }),
+        });
+        if (res.ok) {
+          const token = await res.json();
+          TOKENS[token.id] = {
+            id: token.id,
+            number: token.number,
+            hospitalId: token.hospital_id,
+            departmentId: token.department_id,
+            patientName: token.patient_name,
+            age: token.age,
+            gender: token.gender,
+            phone: token.phone,
+            status: token.status,
+            createdAt: new Date(token.created_at).getTime(),
+          };
+          await syncFromBackend();
+          hideLoadingOverlay();
+          setBtnBusy(btn, false);
+          document.getElementById('register-form').reset();
+          document.getElementById('reg-hospital').value = hospitalId;
+          populateDepartmentSelect(document.getElementById('reg-department'), hospitalId);
+          renderTodaysTokens();
+          showToast(`Token generated: ${token.number}`, 'success');
+          return;
+        }
+      } catch (err) {
+        console.error('API register error:', err);
+      }
+    }
+
     setTimeout(() => {
       const token = createToken(hospitalId, departmentId, name, age, gender, phone);
       hideLoadingOverlay();
@@ -850,11 +1280,39 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   // Staff: login
-  document.getElementById('staff-login-form').addEventListener('submit', function (e) {
+  document.getElementById('staff-login-form').addEventListener('submit', async function (e) {
     e.preventDefault();
     const u = document.getElementById('staff-username').value.trim();
     const p = document.getElementById('staff-password').value;
     const errorEl = document.getElementById('staff-login-error');
+
+    if (BACKEND_ACTIVE) {
+      try {
+        const res = await fetch(`${API_BASE}/auth/staff-login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: u, password: p }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success) {
+            errorEl.classList.add('hidden');
+            state.staff.loggedIn = true;
+            document.getElementById('staff-login-form').reset();
+            navigateTo('staff-dashboard');
+            showToast('Welcome back!', 'success');
+            return;
+          } else {
+            errorEl.textContent = data.message || 'Incorrect username or password. Try staff / staff123.';
+            errorEl.classList.remove('hidden');
+            return;
+          }
+        }
+      } catch (err) {
+        console.error('API login error:', err);
+      }
+    }
+
     if (u === 'staff' && p === 'staff123') {
       errorEl.classList.add('hidden');
       state.staff.loggedIn = true;
@@ -881,5 +1339,6 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   renderCurrentView();
+  checkBackend();
   setInterval(simulationTick, 5000);
 });
