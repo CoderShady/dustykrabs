@@ -72,9 +72,13 @@ class TokenCreate(BaseModel):
     phone: str = Field(min_length=1)
 
 
+class TokenReject(BaseModel):
+    reason: str = Field(min_length=1, description="Reason for rejection")
+
+
 class TokenOut(BaseModel):
     id: str
-    number: str
+    number: str | None = None
     hospital_id: str
     department_id: str
     patient_name: str
@@ -83,8 +87,10 @@ class TokenOut(BaseModel):
     phone: str
     status: str
     created_at: dt.datetime
-    called_at: dt.datetime | None
-    resolved_at: dt.datetime | None
+    approved_at: dt.datetime | None = None
+    called_at: dt.datetime | None = None
+    resolved_at: dt.datetime | None = None
+    rejection_reason: str | None = None
     ahead: int | None = None
     wait_minutes: float | None = None
 

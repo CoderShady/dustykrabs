@@ -105,6 +105,67 @@ def test_department_queue_trail(client: TestClient):
     assert any(item["is_current"] is True for item in trail)
 
 
+def test_token_approval_workflow(client: TestClient):
+    # 1. Patient requests a token
+    req_payload = {
+        "hospital_id": "h1",
+        "department_id": "d1",
+        "patient_name": "Applicant Alice",
+        "age": 25,
+        "gender": "Female",
+        "phone": "9123456780",
+    }
+    req_res = client.post("/api/tokens/request", json=req_payload)
+    assert req_res.status_code == 200
+    req_data = req_res.json()
+    assert req_data["status"] == "pending_approval"
+    assert req_data["patient_name"] == "Applicant Alice"
+    token_id = req_data["id"]
+
+    # 2. Check pending list
+    pending_res = client.get("/api/tokens/pending?hospital_id=h1")
+    assert pending_res.status_code == 200
+    pending_list = pending_res.json()
+    assert any(t["id"] == token_id for t in pending_list)
+
+    # 3. Receptionist approves token
+    approve_res = client.post(f"/api/tokens/{token_id}/approve")
+    assert approve_res.status_code == 200
+    approved_data = approve_res.json()
+    assert approved_data["status"] == "waiting"
+    assert approved_data["number"].startswith("A-")
+    assert approved_data["approved_at"] is not None
+    assert approved_data["ahead"] is not None
+
+    # 4. Token is no longer pending
+    pending_res2 = client.get("/api/tokens/pending?hospital_id=h1")
+    assert not any(t["id"] == token_id for t in pending_res2.json())
+
+
+def test_token_rejection_workflow(client: TestClient):
+    # 1. Patient requests token
+    req_payload = {
+        "hospital_id": "h1",
+        "department_id": "d2",
+        "patient_name": "Applicant Bob",
+        "age": 45,
+        "gender": "Male",
+        "phone": "9123456781",
+    }
+    req_res = client.post("/api/tokens/request", json=req_payload)
+    token_id = req_res.json()["id"]
+
+    # 2. Receptionist rejects token
+    reject_res = client.post(
+        f"/api/tokens/{token_id}/reject",
+        json={"reason": "Incorrect department selected for adult patient."},
+    )
+    assert reject_res.status_code == 200
+    reject_data = reject_res.json()
+    assert reject_data["status"] == "rejected"
+    assert "Incorrect department" in reject_data["rejection_reason"]
+
+
 def test_token_lifecycle(client: TestClient):
     # 1. Create a new token (patient check-in)
     payload = {
@@ -230,21 +291,46 @@ def test_admin_stats_and_alerts(client: TestClient):
 
 
 def test_staff_auth(client: TestClient):
-    # Valid credentials
-    good_res = client.post(
-        "/api/auth/staff-login",
-        json={"username": "staff", "password": "staff123"},
-    )
-    assert good_res.status_code == 200
-    assert good_res.json()["success"] is True
+    # 1. Unauthenticated /me
+    unauth_me = client.get("/api/auth/me")
+    assert unauth_me.status_code == 200
+    assert unauth_me.json()["authenticated"] is False
 
-    # Invalid credentials
+    # 2. Invalid credentials
     bad_res = client.post(
         "/api/auth/staff-login",
         json={"username": "staff", "password": "wrongpassword"},
     )
     assert bad_res.status_code == 200
     assert bad_res.json()["success"] is False
+
+    # 3. Valid credentials -> sets cookie
+    good_res = client.post(
+        "/api/auth/staff-login",
+        json={"username": "staff", "password": "staff123"},
+    )
+    assert good_res.status_code == 200
+    assert good_res.json()["success"] is True
+    assert "opd_staff_session" in good_res.cookies
+
+    # 4. Authenticated /me using session cookie
+    auth_me = client.get("/api/auth/me")
+    assert auth_me.status_code == 200
+    assert auth_me.json()["authenticated"] is True
+    assert auth_me.json()["role"] == "staff"
+
+    # 5. Access /staff page when authenticated -> returns 200
+    staff_page = client.get("/staff")
+    assert staff_page.status_code == 200
+
+    # 6. Logout -> clears cookie
+    logout_res = client.post("/api/auth/staff-logout")
+    assert logout_res.status_code == 200
+
+    # 7. Access /staff page when unauthenticated -> redirects to /staff/login (307)
+    unauth_staff = client.get("/staff", follow_redirects=False)
+    assert unauth_staff.status_code == 307
+    assert unauth_staff.headers["location"] == "/staff/login"
 
 
 def test_simulation_endpoints(client: TestClient):

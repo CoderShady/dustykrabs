@@ -65,7 +65,7 @@ class Token(Base):
     __tablename__ = "tokens"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    number: Mapped[str] = mapped_column(String, nullable=False)  # e.g. "A-001"
+    number: Mapped[str] = mapped_column(String, default="PENDING")  # e.g. "A-001" or "PENDING"
     hospital_id: Mapped[str] = mapped_column(ForeignKey("hospitals.id"))
     department_id: Mapped[str] = mapped_column(ForeignKey("departments.id"))
 
@@ -74,13 +74,15 @@ class Token(Base):
     gender: Mapped[str] = mapped_column(String, nullable=False)
     phone: Mapped[str] = mapped_column(String, nullable=False)
 
-    # waiting -> called -> completed | skipped | noshow
-    status: Mapped[str] = mapped_column(String, default="waiting")
+    # pending_approval -> waiting -> called -> completed | skipped | noshow | rejected
+    status: Mapped[str] = mapped_column(String, default="pending_approval")
     queue_position: Mapped[int] = mapped_column(Integer, default=0)  # explicit FIFO order
 
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    approved_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     called_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     resolved_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(String, nullable=True)
 
     department: Mapped["Department"] = relationship(back_populates="tokens")
 

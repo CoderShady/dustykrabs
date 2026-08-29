@@ -1,351 +1,70 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OPD Queue &amp; Bed System</title>
-<link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OPD Queue &amp; Bed Availability System</title>
+  <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 
-  <!-- Toasts -->
-  <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
-
-  <!-- Global loading overlay -->
-  <div id="loading-overlay" class="loading-overlay hidden" role="status" aria-live="polite">
-    <div class="spinner" aria-hidden="true"></div>
-    <p id="loading-text">Loading…</p>
-  </div>
-
   <header class="app-header">
     <div class="container header-inner">
-      <button class="logo-btn" data-nav="home" aria-label="Go to home">
+      <a href="/" class="logo-btn" style="text-decoration:none;">
         <span class="logo-mark" aria-hidden="true">＋</span>
         <span class="logo-text">OPD Queue &amp; Bed System</span>
-      </button>
+      </a>
       <nav class="header-nav" aria-label="Main navigation">
-        <button class="nav-link" data-nav="patient-portal">Patient Portal</button>
-        <button class="nav-link" data-nav="staff-entry">Staff Portal</button>
+        <a href="/patient" class="nav-link" style="text-decoration:none;">Patient Portal</a>
+        <a href="/staff" class="nav-link" style="text-decoration:none;">Staff Portal</a>
       </nav>
     </div>
   </header>
 
   <main>
-
-    <!-- ============ HOME ============ -->
-    <section id="home" class="view active">
-      <div class="container">
-        <div class="hero">
-          <p class="eyebrow">Outpatient Department</p>
-          <h1>OPD Queue &amp; Bed System</h1>
-          <p class="hero-sub">Skip the crowded waiting room. Get a digital token, track your place in line, and see real-time bed availability — all from your phone.</p>
-          <div class="hero-actions">
-            <button class="btn btn-primary btn-lg" data-nav="patient-portal">I'm a Patient</button>
-            <button class="btn btn-outline btn-lg" data-nav="staff-entry">Staff Login</button>
-          </div>
-        </div>
-
-        <div class="feature-grid" role="list">
-          <div class="feature-card" role="listitem">
-            <div class="feature-icon" aria-hidden="true">🎫</div>
-            <h3>Digital Tokens</h3>
-            <p>Register once and receive a token instantly — no paper, no standing in line.</p>
-          </div>
-          <div class="feature-card" role="listitem">
-            <div class="feature-icon" aria-hidden="true">📡</div>
-            <h3>Live Queue Tracking</h3>
-            <p>Watch your position and estimated wait time update in real time.</p>
-          </div>
-          <div class="feature-card" role="listitem">
-            <div class="feature-icon" aria-hidden="true">🛏️</div>
-            <h3>Bed Visibility</h3>
-            <p>Hospital staff manage bed status live — available, occupied, cleaning, or maintenance.</p>
-          </div>
+    <section class="container" style="padding-top: 40px; padding-bottom: 60px;">
+      <div class="hero">
+        <p class="eyebrow">SIH1620 · Outpatient Department Optimization</p>
+        <h1>Smart OPD Queuing &amp; Bed Availability System</h1>
+        <p class="hero-sub">
+          Skip the crowded waiting room. Model patient flow with real-time $M/M/c$ queuing theory, get verified digital tokens, track your turn live, and monitor ward beds across hospitals.
+        </p>
+        <div class="hero-actions">
+          <a href="/patient" class="btn btn-primary btn-lg" style="text-decoration:none;">I'm a Patient →</a>
+          <a href="/staff" class="btn btn-outline btn-lg" style="text-decoration:none;">Staff Portal Login 🔒</a>
         </div>
       </div>
-    </section>
 
-    <!-- ============ PATIENT PORTAL: HOSPITAL LIST ============ -->
-    <section id="patient-portal" class="view">
-      <div class="container">
-        <button class="link-back" data-nav="home">← Home</button>
-        <h2>Select a Hospital</h2>
-        <p class="section-sub">Choose a hospital to view departments, current queues, and get a token.</p>
-        <div id="hospital-list" class="grid hospital-grid"></div>
-      </div>
-    </section>
-
-    <!-- ============ PATIENT PORTAL: HOSPITAL DETAIL ============ -->
-    <section id="hospital-detail" class="view">
-      <div class="container">
-        <button class="link-back" data-back>← All Hospitals</button>
-        <div id="hospital-detail-header" class="hospital-detail-header"></div>
-        <h3 class="section-heading">Departments</h3>
-        <p class="section-sub">Pick a department to see its live queue and get a token.</p>
-        <div id="department-list" class="grid department-grid"></div>
-      </div>
-    </section>
-
-    <!-- ============ PATIENT PORTAL: TOKEN FORM ============ -->
-    <section id="token-form-view" class="view">
-      <div class="container narrow">
-        <button class="link-back" data-back>← Back</button>
-        <h2>Get Your Token</h2>
-        <p id="tf-context" class="section-sub"></p>
-
-        <form id="token-form" class="card form-card" novalidate>
-          <div id="tf-error" class="form-error hidden" role="alert"></div>
-
-          <div class="field">
-            <label for="tf-name">Full name</label>
-            <input type="text" id="tf-name" class="input" placeholder="e.g. Ananya Iyer" required autocomplete="name">
-          </div>
-
-          <div class="field-row">
-            <div class="field">
-              <label for="tf-age">Age</label>
-              <input type="number" id="tf-age" class="input" placeholder="e.g. 34" min="0" max="120" required>
-            </div>
-            <div class="field">
-              <label for="tf-gender">Gender</label>
-              <select id="tf-gender" class="input" required>
-                <option value="" disabled selected>Select</option>
-                <option value="Female">Female</option>
-                <option value="Male">Male</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="field">
-            <label for="tf-phone">Phone number</label>
-            <input type="tel" id="tf-phone" class="input" placeholder="e.g. 98765 43210" required autocomplete="tel">
-          </div>
-
-          <div class="field">
-            <label for="tf-department">Department</label>
-            <select id="tf-department" class="input" required></select>
-          </div>
-
-          <button type="submit" class="btn btn-primary btn-lg btn-block" id="tf-submit">
-            <span class="btn-label">Generate Token</span>
-            <span class="btn-spinner hidden" aria-hidden="true"></span>
-          </button>
-        </form>
-      </div>
-    </section>
-
-    <!-- ============ PATIENT PORTAL: TOKEN RESULT ============ -->
-    <section id="token-result" class="view">
-      <div class="container narrow">
-        <h2>You're in the queue</h2>
-        <div id="token-result-card" class="token-board"></div>
-        <div class="result-actions">
-          <button class="btn btn-primary btn-lg btn-block" data-action="track-token">Track My Token</button>
-          <button class="btn btn-outline btn-block" data-nav="home">Back to Home</button>
+      <div class="feature-grid" role="list" style="margin-top: 50px;">
+        <div class="feature-card" role="listitem">
+          <div class="feature-icon" aria-hidden="true">🎫</div>
+          <h3>Digital Token Approvals</h3>
+          <p>Patients submit digital check-ins from their phone. Reception staff approve requests in real time to prevent duplicate queues.</p>
+        </div>
+        <div class="feature-card" role="listitem">
+          <div class="feature-icon" aria-hidden="true">⏱️</div>
+          <h3>Erlang-C Wait Times</h3>
+          <p>Queuing theory models expected wait times based on live arrival rates ($\lambda$) and service rates ($\mu$) per counter.</p>
+        </div>
+        <div class="feature-card" role="listitem">
+          <div class="feature-icon" aria-hidden="true">🛏️</div>
+          <h3>Live Bed Availability</h3>
+          <p>Real-time visibility into occupied, available, cleaning, and maintenance beds across all emergency and general wards.</p>
+        </div>
+        <div class="feature-card" role="listitem">
+          <div class="feature-icon" aria-hidden="true">⚠️</div>
+          <h3>Predictive Capacity Alerts</h3>
+          <p>Early warning projections for hospital administration before OPD departments hit congestion thresholds.</p>
         </div>
       </div>
     </section>
-
-    <!-- ============ PATIENT PORTAL: LIVE TRACKER ============ -->
-    <section id="live-tracker" class="view">
-      <div class="container narrow">
-        <button class="link-back" data-nav="home">← Home</button>
-        <h2>Your Queue Status</h2>
-        <div id="live-tracker-content"></div>
-      </div>
-    </section>
-
-    <!-- ============ STAFF: LOGIN ============ -->
-    <section id="staff-entry" class="view">
-      <div class="container narrow">
-        <button class="link-back" data-nav="home">← Home</button>
-        <h2>Staff Login</h2>
-        <p class="section-sub">Sign in to manage reception, queues, and beds.</p>
-
-        <form id="staff-login-form" class="card form-card" novalidate>
-          <div id="staff-login-error" class="form-error hidden" role="alert"></div>
-          <div class="field">
-            <label for="staff-username">Username</label>
-            <input type="text" id="staff-username" class="input" autocomplete="username" required>
-          </div>
-          <div class="field">
-            <label for="staff-password">Password</label>
-            <input type="password" id="staff-password" class="input" autocomplete="current-password" required>
-          </div>
-          <button type="submit" class="btn btn-primary btn-lg btn-block">Login</button>
-          <p class="hint-text">Demo credentials — username: <strong>staff</strong>, password: <strong>staff123</strong></p>
-        </form>
-      </div>
-    </section>
-
-    <!-- ============ STAFF: DASHBOARD ============ -->
-    <section id="staff-dashboard" class="view">
-      <div class="container">
-        <div class="dashboard-topbar">
-          <h2>Staff Dashboard</h2>
-          <button class="btn btn-outline" data-action="staff-logout">Logout</button>
-        </div>
-
-        <div class="dashboard-layout">
-          <nav class="dashboard-tabs" aria-label="Staff sections">
-            <button class="tab-btn active" data-staff-tab="reception">🧾 Reception</button>
-            <button class="tab-btn" data-staff-tab="queue-mgmt">📋 Queue Management</button>
-            <button class="tab-btn" data-staff-tab="bed-mgmt">🛏️ Bed Management</button>
-            <button class="tab-btn" data-staff-tab="admin">📊 Admin Overview</button>
-          </nav>
-
-          <div class="dashboard-content">
-
-            <!-- RECEPTION -->
-            <div id="tab-reception" class="staff-tab active">
-              <div class="two-col">
-                <div class="card form-card">
-                  <h3>Register New Patient</h3>
-                  <form id="register-form" novalidate>
-                    <div id="reg-error" class="form-error hidden" role="alert"></div>
-                    <div class="field">
-                      <label for="reg-hospital">Hospital</label>
-                      <select id="reg-hospital" class="input" required></select>
-                    </div>
-                    <div class="field">
-                      <label for="reg-department">Department</label>
-                      <select id="reg-department" class="input" required></select>
-                    </div>
-                    <div class="field">
-                      <label for="reg-name">Full name</label>
-                      <input type="text" id="reg-name" class="input" required>
-                    </div>
-                    <div class="field-row">
-                      <div class="field">
-                        <label for="reg-age">Age</label>
-                        <input type="number" id="reg-age" class="input" min="0" max="120" required>
-                      </div>
-                      <div class="field">
-                        <label for="reg-gender">Gender</label>
-                        <select id="reg-gender" class="input" required>
-                          <option value="" disabled selected>Select</option>
-                          <option value="Female">Female</option>
-                          <option value="Male">Male</option>
-                          <option value="Other">Other</option>
-                        </select>
-                      </div>
-                    </div>
-                    <div class="field">
-                      <label for="reg-phone">Phone number</label>
-                      <input type="tel" id="reg-phone" class="input" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary btn-block" id="reg-submit">
-                      <span class="btn-label">Register &amp; Generate Token</span>
-                      <span class="btn-spinner hidden" aria-hidden="true"></span>
-                    </button>
-                  </form>
-                </div>
-
-                <div class="card">
-                  <h3>Today's Tokens</h3>
-                  <div id="todays-tokens-list" class="token-list"></div>
-                </div>
-              </div>
-            </div>
-
-            <!-- QUEUE MANAGEMENT -->
-            <div id="tab-queue-mgmt" class="staff-tab">
-              <div class="field-row select-bar">
-                <div class="field">
-                  <label for="qm-hospital">Hospital</label>
-                  <select id="qm-hospital" class="input"></select>
-                </div>
-                <div class="field">
-                  <label for="qm-department">Department</label>
-                  <select id="qm-department" class="input"></select>
-                </div>
-              </div>
-
-              <div id="qm-now-serving" class="now-serving-panel"></div>
-
-              <h3 class="section-heading">Waiting Queue</h3>
-              <div id="qm-queue-list" class="token-list"></div>
-
-              <h3 class="section-heading">Recent Activity</h3>
-              <div id="qm-recent" class="token-list muted-list"></div>
-            </div>
-
-            <!-- BED MANAGEMENT -->
-            <div id="tab-bed-mgmt" class="staff-tab">
-              <div class="field select-bar">
-                <label for="bed-hospital">Hospital</label>
-                <select id="bed-hospital" class="input"></select>
-              </div>
-              <div class="legend" aria-hidden="true">
-                <span class="legend-item"><span class="dot dot-available"></span>Available</span>
-                <span class="legend-item"><span class="dot dot-occupied"></span>Occupied</span>
-                <span class="legend-item"><span class="dot dot-cleaning"></span>Cleaning</span>
-                <span class="legend-item"><span class="dot dot-maintenance"></span>Maintenance</span>
-              </div>
-              <div id="bed-grid" class="bed-grid"></div>
-            </div>
-
-            <!-- ADMIN OVERVIEW -->
-            <div id="tab-admin" class="staff-tab">
-              <div class="field select-bar">
-                <label for="admin-hospital">Hospital</label>
-                <select id="admin-hospital" class="input"></select>
-              </div>
-              <div id="admin-stats"></div>
-            </div>
-
-          </div>
-        </div>
-      </div>
-    </section>
-
   </main>
-
-  <!-- Bed modal -->
-  <div id="bed-modal" class="modal-overlay hidden">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="bed-modal-title">
-      <button class="modal-close" data-action="close-modal" aria-label="Close">✕</button>
-      <h3 id="bed-modal-title">Bed</h3>
-      <p id="bed-modal-current" class="section-sub"></p>
-      <div class="field">
-        <label for="bed-status-select">Status</label>
-        <select id="bed-status-select" class="input">
-          <option value="available">Available</option>
-          <option value="occupied">Occupied</option>
-          <option value="cleaning">Cleaning</option>
-          <option value="maintenance">Maintenance</option>
-        </select>
-      </div>
-      <div class="field" id="bed-patient-field">
-        <label for="bed-patient-name">Patient name</label>
-        <input type="text" id="bed-patient-name" class="input" placeholder="Patient name">
-      </div>
-      <div class="modal-actions">
-        <button class="btn btn-primary btn-block" data-action="save-bed">Save Changes</button>
-        <button class="btn btn-outline btn-block" data-action="release-bed">Release Bed</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Confirm modal -->
-  <div id="confirm-modal" class="modal-overlay hidden">
-    <div class="modal modal-sm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
-      <h3 id="confirm-title">Please confirm</h3>
-      <p id="confirm-message"></p>
-      <div class="modal-actions">
-        <button id="confirm-yes" class="btn btn-danger btn-block">Yes, continue</button>
-        <button id="confirm-no" class="btn btn-outline btn-block">Cancel</button>
-      </div>
-    </div>
-  </div>
 
   <footer class="app-footer">
     <div class="container">
-      <p>OPD Queue &amp; Bed System — demo prototype for illustrative purposes. All data shown is simulated.</p>
+      <p>OPD Queuing &amp; Bed System · SIH1620 Public Healthcare Optimization</p>
     </div>
   </footer>
 
-  <script src="script.js"></script>
 </body>
 </html>

@@ -14,6 +14,16 @@ from app.websocket import manager
 router = APIRouter(prefix="/simulation", tags=["Simulation"])
 
 
+NAME_POOL = [
+    "Aditi Sharma", "Rahul Verma", "Priya Nair", "Karan Mehta", "Sneha Roy",
+    "Arjun Das", "Neha Gupta", "Vikram Singh", "Ananya Iyer", "Rohan Bose",
+    "Ishita Chatterjee", "Manish Kumar", "Pooja Reddy", "Sameer Khan", "Divya Menon",
+]
+
+def random_phone() -> str:
+    return "9" + "".join([str(random.randint(0, 9)) for _ in range(9)])
+
+
 @router.post("/tick")
 async def run_simulation_tick(db: Session = Depends(get_db)):
     """
@@ -39,10 +49,10 @@ async def run_simulation_tick(db: Session = Depends(get_db)):
                 db=db,
                 hospital_id=h.id,
                 department_id=dept.id,
-                patient_name=random.choice(seed.NAME_POOL),
+                patient_name=random.choice(NAME_POOL),
                 age=random.randint(10, 75),
                 gender=random.choice(["Male", "Female", "Other"]),
-                phone=seed.random_phone(),
+                phone=random_phone(),
             )
             events_emitted.append(f"Check-in: {tok.number} -> {dept.name} ({h.name})")
             await manager.broadcast(
@@ -99,7 +109,7 @@ async def run_simulation_tick(db: Session = Depends(get_db)):
         for bed in h.beds:
             if random.random() < 0.05:
                 next_status = cycle.get(bed.status, "available")
-                patient_name = random.choice(seed.NAME_POOL) if next_status == "occupied" else ""
+                patient_name = random.choice(NAME_POOL) if next_status == "occupied" else ""
                 crud.update_bed(db, bed, next_status, patient_name)
                 events_emitted.append(f"Bed {bed.number} ({h.name}) -> {next_status}")
                 await manager.broadcast(

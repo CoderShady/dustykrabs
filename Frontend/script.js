@@ -194,7 +194,18 @@ function initWebSocket() {
     ws.onmessage = async (msg) => {
       try {
         const event = JSON.parse(msg.data);
-        if (event.event === 'patient_alert') {
+        if (event.event === 'token_requested') {
+          showToast(`📋 New OPD token request from ${event.data.patient_name}`, 'info');
+        } else if (event.event === 'token_approved') {
+          if (state.myToken && event.data.token_id === state.myToken.id) {
+            showToast(`🎉 Your token request has been approved! Token: ${event.data.number}`, 'success');
+            state.myToken = { ...state.myToken, id: event.data.token_id };
+          }
+        } else if (event.event === 'token_rejected') {
+          if (state.myToken && event.data.token_id === state.myToken.id) {
+            showToast(`❌ Token request rejected: ${event.data.reason}`, 'danger');
+          }
+        } else if (event.event === 'patient_alert') {
           if (state.myToken && event.data.token_id === state.myToken.id) {
             showToast('🔔 ' + event.data.message, 'warning');
           }
@@ -205,6 +216,9 @@ function initWebSocket() {
         }
         await syncFromBackend();
         renderCurrentView();
+        if (state.staff.loggedIn && state.staff.activeTab === 'reception') {
+          renderPendingTokens();
+        }
       } catch (e) {
         console.error('Error in WS onmessage:', e);
       }
@@ -286,36 +300,59 @@ function createToken(hospitalId, departmentId, patientName, age, gender, phone) 
   return token;
 }
 
-function makeBeds(count) {
+function makeBeds(count, idPrefix) {
   const beds = [];
+  const defaultStatuses = ['available', 'occupied', 'available', 'cleaning', 'available', 'occupied', 'available', 'maintenance'];
+  const defaultNames = ['Rohan Bose', 'Pooja Reddy', 'Divya Menon', 'Arjun Das', 'Neha Gupta', 'Kavita Joshi'];
+  let nameIdx = 0;
   for (let i = 1; i <= count; i++) {
-    const roll = Math.random();
-    let status = 'available';
-    if (roll < 0.42) status = 'occupied';
-    else if (roll < 0.58) status = 'cleaning';
-    else if (roll < 0.66) status = 'maintenance';
-    beds.push({ id: uid('bed'), number: i, status, patientName: status === 'occupied' ? randomName() : '' });
+    const status = defaultStatuses[(i - 1) % defaultStatuses.length];
+    const patientName = status === 'occupied' ? defaultNames[(nameIdx++) % defaultNames.length] : '';
+    beds.push({ id: `bed_${idPrefix}_${i}`, number: i, status, patientName });
   }
   return beds;
 }
 
 function seedData() {
-  HOSPITALS[0].beds = makeBeds(16);
-  HOSPITALS[1].beds = makeBeds(14);
-  HOSPITALS[2].beds = makeBeds(12);
+  HOSPITALS[0].beds = makeBeds(16, 'h1');
+  HOSPITALS[1].beds = makeBeds(14, 'h2');
+  HOSPITALS[2].beds = makeBeds(12, 'h3');
 
-  HOSPITALS.forEach(hospital => {
-    hospital.departments.forEach(dept => {
-      const waitingCount = 2 + Math.floor(Math.random() * 4);
-      for (let i = 0; i < waitingCount; i++) {
-        createToken(hospital.id, dept.id, randomName(), randomAge(), randomGender(), randomPhone());
+  const samples = [
+    { hId: 'h1', dId: 'd1', name: 'Aditi Sharma', age: 34, gender: 'Female', phone: '9876543210', status: 'called' },
+    { hId: 'h1', dId: 'd1', name: 'Rahul Verma', age: 42, gender: 'Male', phone: '9876543211', status: 'waiting' },
+    { hId: 'h1', dId: 'd1', name: 'Karan Mehta', age: 28, gender: 'Male', phone: '9876543212', status: 'waiting' },
+    { hId: 'h1', dId: 'd2', name: 'Ananya Iyer', age: 8, gender: 'Female', phone: '9876543213', status: 'called' },
+    { hId: 'h1', dId: 'd2', name: 'Ishita Chatterjee', age: 11, gender: 'Female', phone: '9876543214', status: 'waiting' },
+    { hId: 'h1', dId: 'd3', name: 'Vikram Singh', age: 55, gender: 'Male', phone: '9876543215', status: 'called' },
+    { hId: 'h1', dId: 'd3', name: 'Sneha Roy', age: 26, gender: 'Female', phone: '9876543216', status: 'waiting' },
+  ];
+
+  samples.forEach(s => {
+    const dept = getDept(s.hId, s.dId);
+    if (dept) {
+      dept.counter += 1;
+      const num = dept.prefix + '-' + String(dept.counter).padStart(3, '0');
+      const tok = {
+        id: `tok_${s.dId}_${dept.counter}`,
+        number: num,
+        hospitalId: s.hId,
+        departmentId: s.dId,
+        patientName: s.name,
+        age: s.age,
+        gender: s.gender,
+        phone: s.phone,
+        status: s.status,
+        createdAt: Date.now() - (dept.counter * 180000),
+        resolvedAt: null,
+      };
+      TOKENS[tok.id] = tok;
+      if (s.status === 'called') {
+        dept.currentTokenId = tok.id;
+      } else {
+        dept.queue.push(tok.id);
       }
-      if (dept.queue.length) {
-        const id = dept.queue.shift();
-        dept.currentTokenId = id;
-        getToken(id).status = 'called';
-      }
-    });
+    }
   });
 }
 
@@ -328,7 +365,7 @@ const state = {
   tokenFormContext: null,
   myToken: null, // { id, hospitalId, departmentId }
   staff: {
-    loggedIn: false,
+    loggedIn: localStorage.getItem('opd_staff_logged_in') === 'true',
     activeTab: 'reception',
     queueMgmt: { hospitalId: null, departmentId: null },
     bedMgmt: { hospitalId: null },
@@ -342,8 +379,9 @@ const state = {
 
 function statusBadge(status) {
   const map = {
+    pending_approval: 'Awaiting Approval',
     waiting: 'Waiting', called: 'Called', completed: 'Completed',
-    skipped: 'Skipped', noshow: 'No-show',
+    skipped: 'Skipped', noshow: 'No-show', rejected: 'Rejected',
     available: 'Available', occupied: 'Occupied', cleaning: 'Cleaning', maintenance: 'Maintenance',
   };
   const label = map[status] || status;
@@ -444,10 +482,43 @@ function renderTokenResult(token) {
   const dept = getDept(token.hospitalId, token.departmentId);
   const hospital = getHospital(token.hospitalId);
   const pos = tokenPositionInfo(token);
+
+  const titleEl = document.getElementById('token-result-title');
+  const subEl = document.getElementById('token-result-sub');
+
+  if (token.status === 'pending_approval') {
+    if (titleEl) titleEl.textContent = 'Request Under Review';
+    if (subEl) subEl.textContent = 'Your OPD ticket request is awaiting approval from the reception desk.';
+    document.getElementById('token-result-card').innerHTML = `
+      <div class="tb-label">Approval Status</div>
+      <div class="tb-number" style="font-size:1.8rem; margin:15px 0; color:var(--warning);">⏳ AWAITING APPROVAL</div>
+      <div class="tb-dept">${escapeHtml(dept ? dept.name : 'Department')} · ${escapeHtml(hospital ? hospital.name : 'Hospital')}</div>
+      <div style="margin-top:16px; padding:12px 14px; background:var(--surface); border:1px dashed var(--border); border-radius:var(--radius-sm); font-size:0.9rem; color:var(--text); text-align:center;">
+        Your details have been submitted to reception. Once staff approves your request, your official token number will appear here automatically via real-time update!
+      </div>
+      <div class="tb-qr">PATIENT<br>${escapeHtml(token.patientName)}</div>`;
+    return;
+  }
+
+  if (token.status === 'rejected') {
+    if (titleEl) titleEl.textContent = 'Request Rejected';
+    if (subEl) subEl.textContent = 'The hospital reception could not approve this request.';
+    document.getElementById('token-result-card').innerHTML = `
+      <div class="tb-label">Status</div>
+      <div class="tb-number" style="font-size:1.8rem; margin:15px 0; color:var(--danger);">✕ REJECTED</div>
+      <div class="tb-dept">${escapeHtml(dept ? dept.name : 'Department')} · ${escapeHtml(hospital ? hospital.name : 'Hospital')}</div>
+      <div style="margin-top:16px; padding:12px 14px; background:var(--danger-bg); color:var(--danger); border-radius:var(--radius-sm); font-size:0.9rem; text-align:center;">
+        <strong>Reason:</strong> ${escapeHtml(token.rejectionReason || 'Department capacity exceeded / please visit reception')}
+      </div>`;
+    return;
+  }
+
+  if (titleEl) titleEl.textContent = "You're in the queue";
+  if (subEl) subEl.textContent = 'Your token is active. Track your position in real time.';
   document.getElementById('token-result-card').innerHTML = `
     <div class="tb-label">Your Token</div>
     <div class="tb-number">${escapeHtml(token.number)}</div>
-    <div class="tb-dept">${escapeHtml(dept.name)} · ${escapeHtml(hospital.name)}</div>
+    <div class="tb-dept">${escapeHtml(dept ? dept.name : 'Department')} · ${escapeHtml(hospital ? hospital.name : 'Hospital')}</div>
     <div class="tb-meta">
       <div><span class="m-num">${pos.ahead ?? 0}</span><span class="m-lbl">Patients ahead</span></div>
       <div><span class="m-num">${formatWait(pos.wait ?? 0)}</span><span class="m-lbl">Est. wait</span></div>
@@ -471,10 +542,12 @@ function renderLiveTracker() {
   const dept = getDept(token.hospitalId, token.departmentId);
   const hospital = getHospital(token.hospitalId);
   const pos = tokenPositionInfo(token);
-  const nowServing = dept.currentTokenId ? getToken(dept.currentTokenId).number : '—';
+  const nowServing = dept && dept.currentTokenId ? getToken(dept.currentTokenId).number : '—';
 
   let statusText = '—', statusColor = 'var(--text)';
-  if (token.status === 'waiting') {
+  if (token.status === 'pending_approval') {
+    statusText = 'Awaiting Reception Approval'; statusColor = 'var(--warning)';
+  } else if (token.status === 'waiting') {
     statusText = pos.ahead <= 1 ? 'Approaching — get ready' : 'In queue';
   } else if (token.status === 'called') {
     statusText = 'Called — please proceed to the counter'; statusColor = 'var(--warning)';
@@ -484,23 +557,25 @@ function renderLiveTracker() {
     statusText = 'Skipped — please check in at reception'; statusColor = 'var(--muted)';
   } else if (token.status === 'noshow') {
     statusText = 'Marked as no-show — please check in at reception'; statusColor = 'var(--danger)';
+  } else if (token.status === 'rejected') {
+    statusText = 'Request Rejected'; statusColor = 'var(--danger)';
   }
 
-  const isFinal = ['completed', 'skipped', 'noshow'].includes(token.status);
+  const isFinal = ['completed', 'skipped', 'noshow', 'rejected'].includes(token.status);
 
   container.innerHTML = `
     <div class="tracker-status">
       <div class="status-big" style="color:${statusColor}">${statusText}</div>
-      <div class="section-sub" style="margin-bottom:0;">${escapeHtml(token.number)} · ${escapeHtml(dept.name)} · ${escapeHtml(hospital.name)}</div>
+      <div class="section-sub" style="margin-bottom:0;">${escapeHtml(token.number || 'Pending')} · ${escapeHtml(dept ? dept.name : 'Department')} · ${escapeHtml(hospital ? hospital.name : 'Hospital')}</div>
     </div>
     <div class="tracker-grid">
       <div class="tracker-metric"><span class="num">${escapeHtml(nowServing)}</span><span class="lbl">Now serving</span></div>
-      <div class="tracker-metric"><span class="num">${escapeHtml(token.number)}</span><span class="lbl">Your token</span></div>
+      <div class="tracker-metric"><span class="num">${escapeHtml(token.number || 'Pending')}</span><span class="lbl">Your token</span></div>
       <div class="tracker-metric"><span class="num">${pos.ahead !== null ? pos.ahead : '—'}</span><span class="lbl">Patients ahead</span></div>
       <div class="tracker-metric"><span class="num">${pos.wait !== null ? formatWait(pos.wait) : '—'}</span><span class="lbl">Est. wait</span></div>
     </div>
     <h3 class="section-heading">Queue Order</h3>
-    ${renderQueueTrail(dept, { highlightTokenId: token.id })}
+    ${dept ? renderQueueTrail(dept, { highlightTokenId: token.id }) : ''}
     ${isFinal ? '<button class="btn btn-outline btn-block" data-nav="patient-portal" style="margin-top:18px;">Get a New Token</button>' : ''}`;
 }
 
@@ -516,19 +591,152 @@ function populateDepartmentSelect(selectEl, hospitalId) {
   selectEl.innerHTML = hospital.departments.map(d => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('');
 }
 
+async function renderPendingTokens() {
+  const el = document.getElementById('pending-tokens-list');
+  const badgeEl = document.getElementById('pa-count-badge');
+  if (!el) return;
+
+  let pending = [];
+  if (BACKEND_ACTIVE) {
+    try {
+      const res = await fetch(`${API_BASE}/tokens/pending`);
+      if (res.ok) {
+        pending = await res.json();
+      }
+    } catch (e) {
+      console.warn('Failed to fetch pending tokens:', e);
+    }
+  } else {
+    pending = Object.values(TOKENS).filter(t => t.status === 'pending_approval');
+  }
+
+  if (badgeEl) badgeEl.textContent = pending.length;
+
+  if (!pending.length) {
+    el.innerHTML = '<div class="empty-row">No pending token requests at this time.</div>';
+    return;
+  }
+
+  el.innerHTML = pending.map(t => {
+    const hospId = t.hospitalId || t.hospital_id;
+    const deptId = t.departmentId || t.department_id;
+    const hospital = getHospital(hospId);
+    const dept = getDept(hospId, deptId);
+    const deptName = dept ? dept.name : 'Department';
+    const hospName = hospital ? hospital.name : 'Hospital';
+    return `
+      <div class="token-row">
+        <div class="tr-left">
+          <span class="tr-name"><strong>${escapeHtml(t.patientName || t.patient_name)}</strong></span>
+          <span class="tr-meta">${escapeHtml(deptName)} · ${escapeHtml(hospName)} · Age: ${t.age}, ${escapeHtml(t.gender)} · 📞 ${escapeHtml(t.phone)}</span>
+        </div>
+        <div class="token-actions" style="display:flex; gap:8px; align-items:center;">
+          <button class="btn btn-primary btn-sm" data-action="approve-token" data-token-id="${t.id}" style="font-size:0.82rem; padding:6px 14px;">✓ Approve</button>
+          <button class="btn btn-outline btn-sm" data-action="reject-token" data-token-id="${t.id}" style="font-size:0.82rem; padding:6px 12px; color:var(--danger); border-color:var(--danger);">✕ Reject</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function approveToken(tokenId) {
+  showLoadingOverlay('Approving token…');
+  if (BACKEND_ACTIVE) {
+    try {
+      const res = await fetch(`${API_BASE}/tokens/${tokenId}/approve`, { method: 'POST' });
+      if (res.ok) {
+        const approved = await res.json();
+        await syncFromBackend();
+        hideLoadingOverlay();
+        renderPendingTokens();
+        renderTodaysTokens();
+        renderQueueMgmt();
+        showToast(`Approved! Token ${approved.number} issued to ${approved.patient_name}.`, 'success');
+        return;
+      } else {
+        const err = await res.json();
+        hideLoadingOverlay();
+        showToast(err.detail || 'Could not approve token.', 'warning');
+        return;
+      }
+    } catch (e) {
+      console.error('Approve token error:', e);
+    }
+  }
+
+  setTimeout(() => {
+    const t = getToken(tokenId);
+    if (t) {
+      const dept = getDept(t.hospitalId, t.departmentId);
+      dept.counter += 1;
+      t.number = dept.prefix + '-' + String(dept.counter).padStart(3, '0');
+      t.status = 'waiting';
+      dept.queue.push(t.id);
+    }
+    hideLoadingOverlay();
+    renderPendingTokens();
+    renderTodaysTokens();
+    renderQueueMgmt();
+    showToast('Token approved.', 'success');
+  }, 300);
+}
+
+async function rejectToken(tokenId, reason) {
+  showLoadingOverlay('Rejecting request…');
+  if (BACKEND_ACTIVE) {
+    try {
+      const res = await fetch(`${API_BASE}/tokens/${tokenId}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: reason || 'Department at capacity' }),
+      });
+      if (res.ok) {
+        await syncFromBackend();
+        hideLoadingOverlay();
+        renderPendingTokens();
+        renderTodaysTokens();
+        showToast('Token request rejected.', 'info');
+        return;
+      } else {
+        const err = await res.json();
+        hideLoadingOverlay();
+        showToast(err.detail || 'Could not reject token.', 'warning');
+        return;
+      }
+    } catch (e) {
+      console.error('Reject token error:', e);
+    }
+  }
+
+  setTimeout(() => {
+    const t = getToken(tokenId);
+    if (t) {
+      t.status = 'rejected';
+      t.rejectionReason = reason;
+    }
+    hideLoadingOverlay();
+    renderPendingTokens();
+    renderTodaysTokens();
+    showToast('Token request rejected.', 'info');
+  }, 300);
+}
+
 function renderTodaysTokens() {
   const el = document.getElementById('todays-tokens-list');
-  const all = Object.values(TOKENS).sort((a, b) => b.createdAt - a.createdAt).slice(0, 25);
-  if (!all.length) { el.innerHTML = '<div class="empty-row">No tokens generated yet.</div>'; return; }
+  const all = Object.values(TOKENS)
+    .filter(t => t.status !== 'pending_approval')
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, 25);
+
+  if (!all.length) { el.innerHTML = '<div class="empty-row">No active tokens generated yet.</div>'; return; }
   el.innerHTML = all.map(t => {
     const hospital = getHospital(t.hospitalId);
     const dept = getDept(t.hospitalId, t.departmentId);
     return `
       <div class="token-row">
         <div class="tr-left">
-          <span class="tr-num">${escapeHtml(t.number)}</span>
+          <span class="tr-num">${escapeHtml(t.number || '—')}</span>
           <span class="tr-name">${escapeHtml(t.patientName)}</span>
-          <span class="tr-meta">${escapeHtml(dept.name)} · ${escapeHtml(hospital.name)}</span>
+          <span class="tr-meta">${escapeHtml(dept ? dept.name : 'Department')} · ${escapeHtml(hospital ? hospital.name : 'Hospital')}</span>
         </div>
         ${statusBadge(t.status)}
       </div>`;
@@ -703,18 +911,95 @@ async function renderAdminStats() {
     </div>`;
 }
 
-/* ================= NAVIGATION ================= */
+/* ================= NAVIGATION & AUTH ================= */
+
+function getCookie(name) {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop().split(';').shift();
+  return null;
+}
+
+async function checkStaffAuth() {
+  if (BACKEND_ACTIVE) {
+    try {
+      const res = await fetch(`${API_BASE}/auth/me`);
+      if (res.ok) {
+        const data = await res.json();
+        state.staff.loggedIn = Boolean(data.authenticated);
+        if (state.staff.loggedIn) {
+          localStorage.setItem('opd_staff_logged_in', 'true');
+        } else {
+          localStorage.removeItem('opd_staff_logged_in');
+        }
+        updateStaffNavUI();
+        return state.staff.loggedIn;
+      }
+    } catch (e) {
+      console.warn('Auth check error:', e);
+    }
+  }
+  const hasCookie = Boolean(getCookie('opd_staff_session'));
+  const hasLocal = localStorage.getItem('opd_staff_logged_in') === 'true';
+  state.staff.loggedIn = hasCookie || hasLocal;
+  updateStaffNavUI();
+  return state.staff.loggedIn;
+}
+
+function updateStaffNavUI() {
+  const staffNavBtns = document.querySelectorAll('[data-nav="staff-entry"], [data-nav="staff-dashboard"]');
+  staffNavBtns.forEach(btn => {
+    if (state.staff.loggedIn) {
+      btn.dataset.nav = 'staff-dashboard';
+      if (btn.classList.contains('nav-link')) {
+        btn.textContent = 'Staff Dashboard';
+      } else if (btn.classList.contains('btn')) {
+        btn.textContent = 'Staff Dashboard →';
+      }
+    } else {
+      btn.dataset.nav = 'staff-entry';
+      if (btn.classList.contains('nav-link')) {
+        btn.textContent = 'Staff Portal';
+      } else if (btn.classList.contains('btn')) {
+        btn.textContent = 'Staff Login';
+      }
+    }
+  });
+}
 
 function navigateTo(viewId, opts) {
   opts = opts || {};
+  if (viewId === 'staff-entry' && state.staff.loggedIn) {
+    viewId = 'staff-dashboard';
+  }
+  if (viewId === 'staff-dashboard' && !state.staff.loggedIn) {
+    viewId = 'staff-entry';
+  }
   const target = document.getElementById(viewId);
   if (!target) return;
   if (!opts.isBack && state.activeView !== viewId) state.viewHistory.push(state.activeView);
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   target.classList.add('active');
   state.activeView = viewId;
+  localStorage.setItem('opd_active_view', viewId);
+
+  try {
+    if (viewId === 'staff-dashboard') {
+      if (window.location.pathname !== '/staff') history.replaceState(null, '', '/staff');
+    } else if (viewId === 'staff-entry') {
+      if (window.location.pathname !== '/staff/login') history.replaceState(null, '', '/staff/login');
+    } else if (viewId === 'patient-portal') {
+      if (window.location.pathname !== '/patient') history.replaceState(null, '', '/patient');
+    } else if (viewId === 'home') {
+      if (window.location.pathname !== '/') history.replaceState(null, '', '/');
+    } else {
+      if (window.location.hash !== '#' + viewId) history.replaceState(null, '', '#' + viewId);
+    }
+  } catch (e) {}
+
   if (viewId === 'home') state.viewHistory = [];
   window.scrollTo({ top: 0, behavior: 'smooth' });
+  updateStaffNavUI();
   renderCurrentView();
 }
 function goBack() { navigateTo(state.viewHistory.pop() || 'home', { isBack: true }); }
@@ -725,6 +1010,7 @@ function renderCurrentView() {
     case 'hospital-detail': renderHospitalDetail(); break;
     case 'live-tracker': renderLiveTracker(); break;
     case 'staff-dashboard':
+      renderPendingTokens();
       renderTodaysTokens();
       if (state.staff.activeTab === 'queue-mgmt') renderQueueMgmt();
       if (state.staff.activeTab === 'bed-mgmt') renderBedGrid();
@@ -978,8 +1264,17 @@ function handleAction(el) {
   } else if (a === 'track-token') {
     navigateTo('live-tracker');
   } else if (a === 'staff-logout') {
-    showConfirm('Log out of the staff portal?', () => {
+    showConfirm('Log out of the staff portal?', async () => {
+      if (BACKEND_ACTIVE) {
+        try {
+          await fetch(`${API_BASE}/auth/staff-logout`, { method: 'POST' });
+        } catch (e) {}
+      }
       state.staff.loggedIn = false;
+      document.cookie = 'opd_staff_session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
+      localStorage.removeItem('opd_staff_logged_in');
+      localStorage.removeItem('opd_active_view');
+      updateStaffNavUI();
       navigateTo('home');
       showToast('Logged out.', 'info');
     });
@@ -1001,6 +1296,13 @@ function handleAction(el) {
     saveBedChanges();
   } else if (a === 'release-bed') {
     showConfirm('Release this bed and mark it available?', releaseBed);
+  } else if (a === 'approve-token') {
+    approveToken(el.dataset.tokenId);
+  } else if (a === 'reject-token') {
+    showConfirm('Reject this token request?', () => rejectToken(el.dataset.tokenId, 'Department capacity exceeded'));
+  } else if (a === 'refresh-pending') {
+    renderPendingTokens();
+    showToast('Refreshed pending requests.', 'info');
   }
 }
 
@@ -1117,14 +1419,14 @@ document.addEventListener('DOMContentLoaded', function () {
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
       document.querySelectorAll('.staff-tab').forEach(p => p.classList.remove('active'));
       document.getElementById('tab-' + tab).classList.add('active');
-      if (tab === 'reception') renderTodaysTokens();
+      if (tab === 'reception') { renderPendingTokens(); renderTodaysTokens(); }
       if (tab === 'queue-mgmt') renderQueueMgmt();
       if (tab === 'bed-mgmt') renderBedGrid();
       if (tab === 'admin') renderAdminStats();
     });
   });
 
-  // Patient: token form submit
+  // Patient: token form submit (Request Token for Approval)
   document.getElementById('token-form').addEventListener('submit', async function (e) {
     e.preventDefault();
     const name = document.getElementById('tf-name').value.trim();
@@ -1143,13 +1445,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const submitBtn = document.getElementById('tf-submit');
     setBtnBusy(submitBtn, true);
-    showLoadingOverlay('Generating your token…');
+    showLoadingOverlay('Submitting token request…');
 
     const hospitalId = state.tokenFormContext.hospitalId;
 
     if (BACKEND_ACTIVE) {
       try {
-        const res = await fetch(`${API_BASE}/tokens`, {
+        const res = await fetch(`${API_BASE}/tokens/request`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1165,7 +1467,7 @@ document.addEventListener('DOMContentLoaded', function () {
           const token = await res.json();
           TOKENS[token.id] = {
             id: token.id,
-            number: token.number,
+            number: token.number || 'PENDING',
             hospitalId: token.hospital_id,
             departmentId: token.department_id,
             patientName: token.patient_name,
@@ -1183,22 +1485,30 @@ document.addEventListener('DOMContentLoaded', function () {
           setBtnBusy(submitBtn, false);
           renderTokenResult(token);
           navigateTo('token-result');
-          showToast(`Token generated: ${token.number}`, 'success');
+          showToast('Request submitted! Awaiting staff approval.', 'info');
           return;
         }
       } catch (err) {
-        console.error('API create token error:', err);
+        console.error('API request token error:', err);
       }
     }
 
     setTimeout(() => {
-      const token = createToken(hospitalId, departmentId, name, age, gender, phone);
+      const token = {
+        id: uid('req'),
+        number: 'PENDING',
+        hospitalId, departmentId,
+        patientName: name, age: Number(age), gender, phone,
+        status: 'pending_approval',
+        createdAt: Date.now(),
+      };
+      TOKENS[token.id] = token;
       state.myToken = { id: token.id, hospitalId, departmentId };
       hideLoadingOverlay();
       setBtnBusy(submitBtn, false);
       renderTokenResult(token);
       navigateTo('token-result');
-      showToast(`Token generated: ${token.number}`, 'success');
+      showToast('Request submitted! Awaiting staff approval.', 'info');
     }, 600);
   });
 
@@ -1222,7 +1532,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const btn = document.getElementById('reg-submit');
     setBtnBusy(btn, true);
-    showLoadingOverlay('Generating token…');
+    showLoadingOverlay('Issuing token…');
 
     if (BACKEND_ACTIVE) {
       try {
@@ -1258,6 +1568,7 @@ document.addEventListener('DOMContentLoaded', function () {
           document.getElementById('register-form').reset();
           document.getElementById('reg-hospital').value = hospitalId;
           populateDepartmentSelect(document.getElementById('reg-department'), hospitalId);
+          renderPendingTokens();
           renderTodaysTokens();
           showToast(`Token generated: ${token.number}`, 'success');
           return;
@@ -1274,6 +1585,7 @@ document.addEventListener('DOMContentLoaded', function () {
       document.getElementById('register-form').reset();
       document.getElementById('reg-hospital').value = hospitalId;
       populateDepartmentSelect(document.getElementById('reg-department'), hospitalId);
+      renderPendingTokens();
       renderTodaysTokens();
       showToast(`Token generated: ${token.number}`, 'success');
     }, 600);
@@ -1298,6 +1610,7 @@ document.addEventListener('DOMContentLoaded', function () {
           if (data.success) {
             errorEl.classList.add('hidden');
             state.staff.loggedIn = true;
+            localStorage.setItem('opd_staff_logged_in', 'true');
             document.getElementById('staff-login-form').reset();
             navigateTo('staff-dashboard');
             showToast('Welcome back!', 'success');
@@ -1316,6 +1629,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (u === 'staff' && p === 'staff123') {
       errorEl.classList.add('hidden');
       state.staff.loggedIn = true;
+      localStorage.setItem('opd_staff_logged_in', 'true');
       document.getElementById('staff-login-form').reset();
       navigateTo('staff-dashboard');
       showToast('Welcome back!', 'success');
@@ -1338,7 +1652,25 @@ document.addEventListener('DOMContentLoaded', function () {
     if (e.key === 'Escape') { closeBedModal(); hideConfirm(); }
   });
 
-  renderCurrentView();
-  checkBackend();
-  setInterval(simulationTick, 5000);
+  await checkBackend();
+  await checkStaffAuth();
+
+  const path = window.location.pathname.replace(/\/$/, '') || '/';
+  const hashView = window.location.hash.replace(/^#/, '');
+  const savedView = localStorage.getItem('opd_active_view');
+
+  let initialView = 'home';
+  if (path === '/staff') {
+    initialView = state.staff.loggedIn ? 'staff-dashboard' : 'staff-entry';
+  } else if (path === '/staff/login') {
+    initialView = state.staff.loggedIn ? 'staff-dashboard' : 'staff-entry';
+  } else if (path === '/patient') {
+    initialView = 'patient-portal';
+  } else if (hashView) {
+    initialView = hashView;
+  } else if (state.staff.loggedIn && savedView === 'staff-dashboard') {
+    initialView = 'staff-dashboard';
+  }
+
+  navigateTo(initialView, { isBack: true });
 });

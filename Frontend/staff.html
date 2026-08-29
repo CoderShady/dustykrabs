@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Staff Dashboard · OPD Queuing &amp; Bed System</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+  <!-- Toasts -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <!-- Global loading overlay -->
+  <div id="loading-overlay" class="loading-overlay hidden" role="status" aria-live="polite">
+    <div class="spinner" aria-hidden="true"></div>
+    <p id="loading-text">Loading…</p>
+  </div>
+
+  <header class="app-header">
+    <div class="container header-inner">
+      <a href="/" class="logo-btn" style="text-decoration:none;">
+        <span class="logo-mark" aria-hidden="true">＋</span>
+        <span class="logo-text">OPD Queue &amp; Bed System</span>
+      </a>
+      <div class="header-right" style="display:flex; align-items:center; gap:14px;">
+        <span class="badge badge-ok" style="font-weight:600;">● Staff Logged In</span>
+        <a href="/patient" class="nav-link" target="_blank" style="text-decoration:none;">Patient View ↗</a>
+        <button id="logout-btn" class="btn btn-outline btn-sm">Log Out</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="container" style="padding-top: 24px; padding-bottom: 60px;">
+      
+      <!-- Staff Tab Navigation -->
+      <nav class="staff-tabs" aria-label="Staff sections">
+        <button class="tab-btn active" data-staff-tab="reception">Reception &amp; Approvals</button>
+        <button class="tab-btn" data-staff-tab="queue-mgmt">Queue Management</button>
+        <button class="tab-btn" data-staff-tab="bed-mgmt">Bed Management</button>
+        <button class="tab-btn" data-staff-tab="admin">Admin &amp; Alerts</button>
+      </nav>
+
+      <!-- TAB 1: RECEPTION -->
+      <div id="tab-reception" class="staff-tab active">
+        
+        <!-- PENDING APPROVALS DESK -->
+        <div class="card" style="margin-bottom: 24px; border-left: 4px solid var(--color-warning);">
+          <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <div>
+              <h3 style="margin:0; display:inline-flex; align-items:center; gap:8px;">
+                Pending Token Requests
+                <span id="pending-count-badge" class="badge badge-pending_approval">0 pending</span>
+              </h3>
+              <p class="card-sub" style="margin-top:4px;">Approve patient check-in requests to issue official token numbers and enter FIFO queue.</p>
+            </div>
+            <button id="refresh-pending-btn" class="btn btn-outline btn-sm">↻ Refresh Requests</button>
+          </div>
+          <div id="pending-tokens-list" class="token-list" style="margin-top:16px;">
+            <div class="empty-row">No pending token requests at this time.</div>
+          </div>
+        </div>
+
+        <div class="staff-reception-grid">
+          <!-- Direct Token Registration -->
+          <div class="card">
+            <h3>Issue Direct Token</h3>
+            <p class="card-sub">For walk-in patients registered directly at the reception desk.</p>
+            <form id="register-form" novalidate style="margin-top:16px;">
+              <div id="reg-error" class="form-error hidden" role="alert"></div>
+
+              <div class="form-row">
+                <div class="field">
+                  <label for="reg-hospital">Hospital</label>
+                  <select id="reg-hospital" required></select>
+                </div>
+                <div class="field">
+                  <label for="reg-department">Department</label>
+                  <select id="reg-department" required></select>
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="reg-name">Patient Name</label>
+                <input type="text" id="reg-name" required placeholder="e.g. Ramesh Kumar">
+              </div>
+
+              <div class="form-row">
+                <div class="field">
+                  <label for="reg-age">Age</label>
+                  <input type="number" id="reg-age" min="1" max="120" required placeholder="35">
+                </div>
+                <div class="field">
+                  <label for="reg-gender">Gender</label>
+                  <select id="reg-gender" required>
+                    <option value="">Select</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="reg-phone">Phone Number</label>
+                <input type="tel" id="reg-phone" required placeholder="10-digit mobile" maxlength="10">
+              </div>
+
+              <button type="submit" id="reg-submit" class="btn btn-primary btn-block" style="margin-top:14px;">Issue Token</button>
+            </form>
+          </div>
+
+          <!-- Today's Active Tokens -->
+          <div class="card">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <h3 style="margin:0;">Today's Active Tokens</h3>
+                <p class="card-sub" style="margin-top:4px;">Recently generated approved tokens.</p>
+              </div>
+              <button id="refresh-tokens-btn" class="btn btn-outline btn-sm">↻ Refresh</button>
+            </div>
+            <div id="todays-tokens-list" class="token-list" style="margin-top:16px;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 2: QUEUE MANAGEMENT -->
+      <div id="tab-queue-mgmt" class="staff-tab">
+        <div class="card filter-card">
+          <div class="form-row">
+            <div class="field">
+              <label for="qm-hospital">Hospital</label>
+              <select id="qm-hospital"></select>
+            </div>
+            <div class="field">
+              <label for="qm-department">Department</label>
+              <select id="qm-department"></select>
+            </div>
+          </div>
+        </div>
+
+        <div class="qm-layout" style="margin-top:20px;">
+          <!-- Now Serving Card -->
+          <div class="card qm-current-card">
+            <h3>Now Serving</h3>
+            <div id="qm-serving-detail" class="qm-serving-detail"></div>
+          </div>
+
+          <!-- Waiting Queue Card -->
+          <div class="card qm-queue-card">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <h3 style="margin:0;">Waiting Queue</h3>
+                <p class="card-sub" id="qm-queue-summary" style="margin-top:4px;"></p>
+              </div>
+              <button id="refresh-queue-btn" class="btn btn-outline btn-sm">↻ Refresh Queue</button>
+            </div>
+            <div id="qm-waiting-list" class="token-list" style="margin-top:16px;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 3: BED MANAGEMENT -->
+      <div id="tab-bed-mgmt" class="staff-tab">
+        <div class="card filter-card">
+          <div class="field" style="max-width:320px;">
+            <label for="bed-hospital">Select Hospital</label>
+            <select id="bed-hospital"></select>
+          </div>
+        </div>
+
+        <div id="bed-summary-bar" class="bed-summary-bar" style="margin-top:20px;"></div>
+        <div id="bed-grid" class="bed-grid" style="margin-top:20px;"></div>
+      </div>
+
+      <!-- TAB 4: ADMIN & ALERTS -->
+      <div id="tab-admin" class="staff-tab">
+        <div class="card filter-card">
+          <div class="field" style="max-width:320px;">
+            <label for="admin-hospital">Hospital Scope</label>
+            <select id="admin-hospital"></select>
+          </div>
+        </div>
+
+        <div id="admin-stats-grid" class="admin-stats-grid" style="margin-top:20px;"></div>
+
+        <div class="card" style="margin-top:24px;">
+          <h3>Live Predictive Capacity Alerts (M/M/c Engine)</h3>
+          <p class="card-sub">Proactive notifications triggered when arrival rates ($\lambda$) exceed counter service capacity.</p>
+          <div id="admin-alerts-list" class="alerts-list" style="margin-top:16px;"></div>
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+  <!-- BED EDIT MODAL -->
+  <div id="bed-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal card">
+      <div class="modal-header">
+        <h3 id="modal-bed-title">Edit Bed</h3>
+        <button id="close-bed-modal-btn" class="modal-close" aria-label="Close modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label for="bed-status-select">Status</label>
+          <select id="bed-status-select">
+            <option value="available">Available</option>
+            <option value="occupied">Occupied</option>
+            <option value="cleaning">Cleaning</option>
+            <option value="maintenance">Maintenance</option>
+          </select>
+        </div>
+        <div id="bed-patient-field" class="field hidden">
+          <label for="bed-patient-name">Patient Name</label>
+          <input type="text" id="bed-patient-name" placeholder="Enter patient name">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button id="save-bed-btn" class="btn btn-primary btn-block">Save Changes</button>
+        <button id="release-bed-btn" class="btn btn-danger btn-block">Release Bed</button>
+        <button id="cancel-bed-btn" class="btn btn-outline btn-block">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CONFIRMATION MODAL -->
+  <div id="confirm-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal card">
+      <h3 id="confirm-title" style="margin-top:0;">Confirm Action</h3>
+      <p id="confirm-message" style="margin: 12px 0 20px; color: var(--color-text-secondary);"></p>
+      <div class="modal-actions">
+        <button id="confirm-yes" class="btn btn-danger btn-block">Yes, continue</button>
+        <button id="confirm-no" class="btn btn-outline btn-block">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="app-footer">
+    <div class="container">
+      <p>OPD Queuing &amp; Bed System · Staff Operational Dashboard</p>
+    </div>
+  </footer>
+
+  <script src="/staff.js"></script>
+</body>
+</html>

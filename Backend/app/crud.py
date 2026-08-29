@@ -165,6 +165,85 @@ def estimate_wait_minutes_for_position(dept: models.Department, ahead_count: int
 # Token lifecycle
 # ------------------------------------------------------------------ #
 
+def create_token_request(
+    db: Session,
+    hospital_id: str,
+    department_id: str,
+    patient_name: str,
+    age: int,
+    gender: str,
+    phone: str,
+) -> models.Token:
+    dept = get_department(db, hospital_id, department_id)
+    if dept is None:
+        raise ValueError("Department not found for this hospital")
+
+    token = models.Token(
+        id=new_id("req"),
+        number="PENDING",
+        hospital_id=hospital_id,
+        department_id=department_id,
+        patient_name=patient_name,
+        age=age,
+        gender=gender,
+        phone=phone,
+        status="pending_approval",
+        queue_position=0,
+        created_at=models.utcnow(),
+    )
+    db.add(token)
+    db.commit()
+    db.refresh(token)
+    return token
+
+
+def approve_token(db: Session, token: models.Token) -> models.Token:
+    dept = get_department_by_id(db, token.department_id)
+    if dept is None:
+        raise ValueError("Department not found")
+
+    if token.status != "pending_approval":
+        raise ValueError(f"Token cannot be approved from status '{token.status}'")
+
+    dept.token_counter += 1
+    token.number = f"{dept.prefix}-{dept.token_counter:03d}"
+
+    max_pos = db.scalar(
+        select(func.max(models.Token.queue_position)).where(
+            models.Token.department_id == token.department_id,
+            models.Token.status.in_(["waiting", "called"]),
+        )
+    ) or 0
+
+    token.status = "waiting"
+    token.queue_position = max_pos + 1
+    token.approved_at = models.utcnow()
+    db.commit()
+    db.refresh(token)
+    return token
+
+
+def reject_token(db: Session, token: models.Token, reason: str) -> models.Token:
+    if token.status != "pending_approval":
+        raise ValueError(f"Token cannot be rejected from status '{token.status}'")
+
+    token.status = "rejected"
+    token.rejection_reason = reason
+    token.resolved_at = models.utcnow()
+    db.commit()
+    db.refresh(token)
+    return token
+
+
+def list_pending_tokens(db: Session, hospital_id: str | None = None, department_id: str | None = None) -> list[models.Token]:
+    stmt = select(models.Token).where(models.Token.status == "pending_approval").order_by(models.Token.created_at.asc())
+    if hospital_id and hospital_id != "all":
+        stmt = stmt.where(models.Token.hospital_id == hospital_id)
+    if department_id:
+        stmt = stmt.where(models.Token.department_id == department_id)
+    return list(db.scalars(stmt))
+
+
 def create_token(
     db: Session,
     hospital_id: str,
@@ -182,7 +261,10 @@ def create_token(
     number = f"{dept.prefix}-{dept.token_counter:03d}"
 
     max_pos = db.scalar(
-        select(func.max(models.Token.queue_position)).where(models.Token.department_id == department_id)
+        select(func.max(models.Token.queue_position)).where(
+            models.Token.department_id == department_id,
+            models.Token.status.in_(["waiting", "called"]),
+        )
     ) or 0
 
     token = models.Token(
@@ -197,6 +279,7 @@ def create_token(
         status="waiting",
         queue_position=max_pos + 1,
         created_at=models.utcnow(),
+        approved_at=models.utcnow(),
     )
     db.add(token)
     db.commit()
@@ -243,8 +326,10 @@ def token_to_out(db: Session, token: models.Token) -> schemas.TokenOut:
         phone=token.phone,
         status=token.status,
         created_at=token.created_at,
+        approved_at=token.approved_at,
         called_at=token.called_at,
         resolved_at=token.resolved_at,
+        rejection_reason=token.rejection_reason,
         ahead=pos["ahead"],
         wait_minutes=pos["wait_minutes"],
     )
