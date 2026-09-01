@@ -13,6 +13,15 @@ class HospitalSummary(BaseModel):
     id: str
     name: str
     location: str
+    city: str | None = None
+    district: str | None = None
+    region: str | None = None
+    hospital_tier: str | None = None
+    emergency_24x7: bool | None = None
+    total_doctors: int | None = None
+    total_inpatient_beds: int | None = None
+    total_opd_consultation_rooms: int | None = None
+    daily_opd_token_capacity: int | None = None
     department_count: int
     total_waiting: int
     avg_wait_minutes: float
@@ -32,6 +41,16 @@ class HospitalDetail(BaseModel):
     id: str
     name: str
     location: str
+    city: str | None = None
+    district: str | None = None
+    region: str | None = None
+    hospital_tier: str | None = None
+    emergency_24x7: bool | None = None
+    total_doctors: int | None = None
+    total_inpatient_beds: int | None = None
+    total_opd_consultation_rooms: int | None = None
+    daily_opd_token_capacity: int | None = None
+    department_count: int
     total_waiting: int
     avg_wait_minutes: float
     departments: list[DepartmentSummary]
@@ -158,14 +177,14 @@ class AlertOut(BaseModel):
     severity: str
 
 
-# ---------------- Staff auth ---------------- #
+# ---------------- Hospital portal auth ---------------- #
 
-class StaffLogin(BaseModel):
+class HospitalLogin(BaseModel):
     username: str
     password: str
 
 
-class StaffLoginResult(BaseModel):
+class HospitalLoginResult(BaseModel):
     success: bool
     token: str | None = None
     message: str | None = None

@@ -68,8 +68,10 @@ def get_admin_stats(
             max_hosp_waiting = hosp_waiting
             busiest_hosp_name = hospital.name
 
+        recorded_beds = len(hospital.beds)
+        configured_beds = hospital.total_inpatient_beds or 0
+        total_beds += max(recorded_beds, configured_beds)
         for bed in hospital.beds:
-            total_beds += 1
             if bed.status == "occupied":
                 occupied_beds += 1
 

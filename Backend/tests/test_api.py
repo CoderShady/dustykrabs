@@ -20,6 +20,10 @@ TEST_ENGINE = create_engine(
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=TEST_ENGINE)
 
+HOSPITAL_ID = "WB-DEMO-001"
+DEPARTMENT_ID = f"{HOSPITAL_ID}-D01"
+SECOND_DEPARTMENT_ID = f"{HOSPITAL_ID}-D02"
+
 
 def override_get_db():
     db = TestingSessionLocal()
@@ -59,22 +63,33 @@ def test_list_hospitals(client: TestClient):
     res = client.get("/api/hospitals")
     assert res.status_code == 200
     hospitals = res.json()
-    assert len(hospitals) == 3
+    assert len(hospitals) == 20
     for h in hospitals:
         assert "id" in h
         assert "name" in h
+        assert "demo" not in h["name"].lower()
         assert "total_waiting" in h
         assert "avg_wait_minutes" in h
-        assert h["department_count"] == 3
+    hospital = next(h for h in hospitals if h["id"] == "WB-DEMO-001")
+    assert hospital["city"] == "Kolkata"
+    assert hospital["district"] == "Kolkata"
+    assert hospital["region"] == "South Bengal"
+    assert hospital["hospital_tier"] == "tertiary"
+    assert hospital["emergency_24x7"] is True
+    assert hospital["total_doctors"] == 360
+    assert hospital["total_inpatient_beds"] == 800
+    assert hospital["total_opd_consultation_rooms"] == 58
+    assert hospital["daily_opd_token_capacity"] == 2600
+    assert hospital["department_count"] == 28
 
 
 def test_get_hospital_detail(client: TestClient):
-    res = client.get("/api/hospitals/h1")
+    res = client.get(f"/api/hospitals/{HOSPITAL_ID}")
     assert res.status_code == 200
     detail = res.json()
-    assert detail["id"] == "h1"
-    assert detail["name"] == "City General Hospital"
-    assert len(detail["departments"]) == 3
+    assert detail["id"] == HOSPITAL_ID
+    assert detail["name"] == "Kolkata Central Multispecialty Hospital"
+    assert len(detail["departments"]) == 28
     dept = detail["departments"][0]
     assert "now_serving" in dept
     assert "queue_size" in dept
@@ -82,11 +97,73 @@ def test_get_hospital_detail(client: TestClient):
     assert "num_counters" in dept
 
 
+def test_expanded_hospital_has_operational_dashboard_data(client: TestClient):
+    hospital_id = "WB-DEMO-001"
+    detail_res = client.get(f"/api/hospitals/{hospital_id}")
+    assert detail_res.status_code == 200
+    detail = detail_res.json()
+
+    assert detail["name"] == "Kolkata Central Multispecialty Hospital"
+    assert len(detail["departments"]) == detail["department_count"] == 28
+    assert len({department["id"] for department in detail["departments"]}) == 28
+
+    department = detail["departments"][0]
+    metrics_res = client.get(
+        f"/api/hospitals/{hospital_id}/departments/{department['id']}/metrics"
+    )
+    assert metrics_res.status_code == 200
+    assert metrics_res.json()["department_id"] == department["id"]
+
+    beds_res = client.get(f"/api/hospitals/{hospital_id}/beds")
+    assert beds_res.status_code == 200
+    assert len(beds_res.json()) == 16
+
+
+def test_expanded_hospital_token_and_bed_workflows(client: TestClient):
+    hospital_id = "WB-DEMO-020"
+    department_id = f"{hospital_id}-D01"
+
+    token_res = client.post(
+        "/api/tokens",
+        json={
+            "hospital_id": hospital_id,
+            "department_id": department_id,
+            "patient_name": "New Hospital Patient",
+            "age": 38,
+            "gender": "Female",
+            "phone": "9000000020",
+        },
+    )
+    assert token_res.status_code == 200
+    token = token_res.json()
+    assert token["number"].startswith("GM-")
+    assert token["status"] == "waiting"
+
+    queue_res = client.get(f"/api/departments/{department_id}/queue")
+    assert queue_res.status_code == 200
+    assert any(item["id"] == token["id"] for item in queue_res.json()["waiting"])
+
+    beds = client.get(f"/api/hospitals/{hospital_id}/beds").json()
+    bed_id = beds[0]["id"]
+    occupy_res = client.patch(
+        f"/api/beds/{bed_id}",
+        json={"status": "occupied", "patient_name": "New Hospital Inpatient"},
+    )
+    assert occupy_res.status_code == 200
+    assert occupy_res.json()["patient_name"] == "New Hospital Inpatient"
+
+    release_res = client.post(f"/api/beds/{bed_id}/release")
+    assert release_res.status_code == 200
+    assert release_res.json()["status"] == "available"
+
+
 def test_department_metrics(client: TestClient):
-    res = client.get("/api/hospitals/h1/departments/d1/metrics")
+    res = client.get(
+        f"/api/hospitals/{HOSPITAL_ID}/departments/{DEPARTMENT_ID}/metrics"
+    )
     assert res.status_code == 200
     m = res.json()
-    assert m["department_id"] == "d1"
+    assert m["department_id"] == DEPARTMENT_ID
     assert m["lambda_per_hour"] > 0
     assert m["mu_per_hour"] > 0
     assert m["c"] == 2
@@ -96,20 +173,34 @@ def test_department_metrics(client: TestClient):
 
 
 def test_department_queue_trail(client: TestClient):
-    res = client.get("/api/hospitals/h1/departments/d1/trail")
+    create_res = client.post(
+        "/api/tokens",
+        json={
+            "hospital_id": HOSPITAL_ID,
+            "department_id": DEPARTMENT_ID,
+            "patient_name": "Queue Trail Patient",
+            "age": 29,
+            "gender": "Male",
+            "phone": "9123456799",
+        },
+    )
+    assert create_res.status_code == 200
+
+    res = client.get(
+        f"/api/hospitals/{HOSPITAL_ID}/departments/{DEPARTMENT_ID}/trail"
+    )
     assert res.status_code == 200
     trail = res.json()
     assert isinstance(trail, list)
     assert len(trail) > 0
-    # First element is usually the current token
-    assert any(item["is_current"] is True for item in trail)
+    assert any(item["id"] == create_res.json()["id"] for item in trail)
 
 
 def test_token_approval_workflow(client: TestClient):
     # 1. Patient requests a token
     req_payload = {
-        "hospital_id": "h1",
-        "department_id": "d1",
+        "hospital_id": HOSPITAL_ID,
+        "department_id": DEPARTMENT_ID,
         "patient_name": "Applicant Alice",
         "age": 25,
         "gender": "Female",
@@ -122,31 +213,56 @@ def test_token_approval_workflow(client: TestClient):
     assert req_data["patient_name"] == "Applicant Alice"
     token_id = req_data["id"]
 
-    # 2. Check pending list
-    pending_res = client.get("/api/tokens/pending?hospital_id=h1")
+    # 2. The request appears in today's reception list but not the live queue.
+    pending_res = client.get(f"/api/tokens/pending?hospital_id={HOSPITAL_ID}")
     assert pending_res.status_code == 200
     pending_list = pending_res.json()
     assert any(t["id"] == token_id for t in pending_list)
 
-    # 3. Receptionist approves token
+    todays_res = client.get(
+        f"/api/tokens?hospital_id={HOSPITAL_ID}&today_only=true&limit=500"
+    )
+    assert todays_res.status_code == 200
+    assert any(t["id"] == token_id for t in todays_res.json())
+
+    queue_before_hold = client.get(f"/api/departments/{DEPARTMENT_ID}/queue").json()
+    assert not any(t["id"] == token_id for t in queue_before_hold["waiting"])
+
+    # 3. Receptionist keeps it on hold; it remains out of Queue Management.
+    hold_res = client.post(f"/api/tokens/{token_id}/hold")
+    assert hold_res.status_code == 200
+    assert hold_res.json()["status"] == "on_hold"
+
+    queue_on_hold = client.get(f"/api/departments/{DEPARTMENT_ID}/queue").json()
+    assert not any(t["id"] == token_id for t in queue_on_hold["waiting"])
+
+    held_today = client.get(
+        f"/api/tokens?hospital_id={HOSPITAL_ID}&today_only=true&limit=500"
+    ).json()
+    assert next(t for t in held_today if t["id"] == token_id)["status"] == "on_hold"
+
+    # 4. Approval assigns a number and moves the held request into the queue.
     approve_res = client.post(f"/api/tokens/{token_id}/approve")
     assert approve_res.status_code == 200
     approved_data = approve_res.json()
     assert approved_data["status"] == "waiting"
-    assert approved_data["number"].startswith("A-")
+    assert approved_data["number"].startswith("GM-")
     assert approved_data["approved_at"] is not None
     assert approved_data["ahead"] is not None
 
-    # 4. Token is no longer pending
-    pending_res2 = client.get("/api/tokens/pending?hospital_id=h1")
+    queued = client.get(f"/api/departments/{DEPARTMENT_ID}/queue").json()
+    assert any(t["id"] == token_id for t in queued["waiting"])
+
+    # 5. Token is no longer pending
+    pending_res2 = client.get(f"/api/tokens/pending?hospital_id={HOSPITAL_ID}")
     assert not any(t["id"] == token_id for t in pending_res2.json())
 
 
 def test_token_rejection_workflow(client: TestClient):
     # 1. Patient requests token
     req_payload = {
-        "hospital_id": "h1",
-        "department_id": "d2",
+        "hospital_id": HOSPITAL_ID,
+        "department_id": SECOND_DEPARTMENT_ID,
         "patient_name": "Applicant Bob",
         "age": 45,
         "gender": "Male",
@@ -169,8 +285,8 @@ def test_token_rejection_workflow(client: TestClient):
 def test_token_lifecycle(client: TestClient):
     # 1. Create a new token (patient check-in)
     payload = {
-        "hospital_id": "h1",
-        "department_id": "d1",
+        "hospital_id": HOSPITAL_ID,
+        "department_id": DEPARTMENT_ID,
         "patient_name": "Test Patient",
         "age": 30,
         "gender": "Female",
@@ -179,7 +295,7 @@ def test_token_lifecycle(client: TestClient):
     create_res = client.post("/api/tokens", json=payload)
     assert create_res.status_code == 200
     token = create_res.json()
-    assert token["number"].startswith("A-")
+    assert token["number"].startswith("GM-")
     assert token["patient_name"] == "Test Patient"
     assert token["status"] == "waiting"
     assert token["ahead"] is not None
@@ -193,15 +309,30 @@ def test_token_lifecycle(client: TestClient):
     assert get_res.json()["id"] == token_id
 
     # 3. List tokens for reception
-    list_res = client.get("/api/tokens?hospital_id=h1&department_id=d1")
+    list_res = client.get(
+        f"/api/tokens?hospital_id={HOSPITAL_ID}&department_id={DEPARTMENT_ID}"
+    )
     assert list_res.status_code == 200
     tokens = list_res.json()
     assert any(t["id"] == token_id for t in tokens)
 
 
 def test_department_queue_management(client: TestClient):
-    # 1. Inspect queue view
-    view_res = client.get("/api/departments/d1/queue")
+    # 1. Add a patient and inspect the queue view
+    create_res = client.post(
+        "/api/tokens",
+        json={
+            "hospital_id": HOSPITAL_ID,
+            "department_id": DEPARTMENT_ID,
+            "patient_name": "Queue Management Patient",
+            "age": 41,
+            "gender": "Female",
+            "phone": "9123456798",
+        },
+    )
+    assert create_res.status_code == 200
+
+    view_res = client.get(f"/api/departments/{DEPARTMENT_ID}/queue")
     assert view_res.status_code == 200
     view = view_res.json()
     assert "department_id" in view
@@ -211,26 +342,26 @@ def test_department_queue_management(client: TestClient):
     # 2. If already serving, resolve it first
     if view["now_serving"]:
         resolve_res = client.post(
-            "/api/departments/d1/resolve",
+            f"/api/departments/{DEPARTMENT_ID}/resolve",
             json={"status": "completed"},
         )
         assert resolve_res.status_code == 200
         assert resolve_res.json()["status"] == "completed"
 
     # 3. Call next patient
-    call_res = client.post("/api/departments/d1/call-next")
+    call_res = client.post(f"/api/departments/{DEPARTMENT_ID}/call-next")
     assert call_res.status_code == 200
     called = call_res.json()
     assert called["status"] == "called"
     assert called["called_at"] is not None
 
     # 4. Try calling again while counter busy -> should reject with 400
-    double_call = client.post("/api/departments/d1/call-next")
+    double_call = client.post(f"/api/departments/{DEPARTMENT_ID}/call-next")
     assert double_call.status_code == 400
 
     # 5. Resolve as completed
     resolve_res2 = client.post(
-        "/api/departments/d1/resolve",
+        f"/api/departments/{DEPARTMENT_ID}/resolve",
         json={"status": "completed"},
     )
     assert resolve_res2.status_code == 200
@@ -238,18 +369,22 @@ def test_department_queue_management(client: TestClient):
 
 
 def test_counter_update(client: TestClient):
-    res = client.patch("/api/departments/d1/counters", json={"num_counters": 3})
+    res = client.patch(
+        f"/api/departments/{DEPARTMENT_ID}/counters", json={"num_counters": 3}
+    )
     assert res.status_code == 200
     assert res.json()["num_counters"] == 3
 
     # Check metrics reflected new counter count
-    m_res = client.get("/api/hospitals/h1/departments/d1/metrics")
+    m_res = client.get(
+        f"/api/hospitals/{HOSPITAL_ID}/departments/{DEPARTMENT_ID}/metrics"
+    )
     assert m_res.json()["c"] == 3
 
 
 def test_bed_management(client: TestClient):
     # 1. List beds
-    list_res = client.get("/api/hospitals/h1/beds")
+    list_res = client.get(f"/api/hospitals/{HOSPITAL_ID}/beds")
     assert list_res.status_code == 200
     beds = list_res.json()
     assert len(beds) == 16
@@ -277,20 +412,20 @@ def test_admin_stats_and_alerts(client: TestClient):
     assert stats_res.status_code == 200
     stats = stats_res.json()
     assert stats["total_waiting"] >= 0
-    assert stats["total_beds"] == 42  # 16 + 14 + 12
+    assert stats["total_beds"] == 8460
     assert "occupied_pct" in stats
     assert "avg_utilization" in stats
 
     alerts_res = client.get("/api/admin/alerts")
     assert alerts_res.status_code == 200
     alerts = alerts_res.json()
-    assert len(alerts) == 9  # 3 hospitals * 3 depts
+    assert len(alerts) == 560  # 20 hospitals * 28 departments
     for a in alerts:
         assert a["severity"] in ["ok", "warning", "critical"]
         assert "message" in a
 
 
-def test_staff_auth(client: TestClient):
+def test_hospital_auth(client: TestClient):
     # 1. Unauthenticated /me
     unauth_me = client.get("/api/auth/me")
     assert unauth_me.status_code == 200
@@ -298,7 +433,7 @@ def test_staff_auth(client: TestClient):
 
     # 2. Invalid credentials
     bad_res = client.post(
-        "/api/auth/staff-login",
+        "/api/auth/hospital-login",
         json={"username": "staff", "password": "wrongpassword"},
     )
     assert bad_res.status_code == 200
@@ -306,31 +441,31 @@ def test_staff_auth(client: TestClient):
 
     # 3. Valid credentials -> sets cookie
     good_res = client.post(
-        "/api/auth/staff-login",
+        "/api/auth/hospital-login",
         json={"username": "staff", "password": "staff123"},
     )
     assert good_res.status_code == 200
     assert good_res.json()["success"] is True
-    assert "opd_staff_session" in good_res.cookies
+    assert "opd_hospital_session" in good_res.cookies
 
     # 4. Authenticated /me using session cookie
     auth_me = client.get("/api/auth/me")
     assert auth_me.status_code == 200
     assert auth_me.json()["authenticated"] is True
-    assert auth_me.json()["role"] == "staff"
+    assert auth_me.json()["role"] == "hospital"
 
-    # 5. Access /staff page when authenticated -> returns 200
-    staff_page = client.get("/staff")
-    assert staff_page.status_code == 200
+    # 5. Access /hospital page when authenticated -> returns 200
+    hospital_page = client.get("/hospital")
+    assert hospital_page.status_code == 200
 
     # 6. Logout -> clears cookie
-    logout_res = client.post("/api/auth/staff-logout")
+    logout_res = client.post("/api/auth/hospital-logout")
     assert logout_res.status_code == 200
 
-    # 7. Access /staff page when unauthenticated -> redirects to /staff/login (307)
-    unauth_staff = client.get("/staff", follow_redirects=False)
-    assert unauth_staff.status_code == 307
-    assert unauth_staff.headers["location"] == "/staff/login"
+    # 7. Access /hospital when unauthenticated -> redirects to /hospital/login (307)
+    unauth_hospital = client.get("/hospital", follow_redirects=False)
+    assert unauth_hospital.status_code == 307
+    assert unauth_hospital.headers["location"] == "/hospital/login"
 
 
 def test_simulation_endpoints(client: TestClient):
@@ -341,9 +476,9 @@ def test_simulation_endpoints(client: TestClient):
     status_res = client.get("/api/simulation/status")
     assert status_res.status_code == 200
     data = status_res.json()
-    assert data["hospitals"] == 3
-    assert data["departments"] == 9
-    assert data["beds"] == 42
+    assert data["hospitals"] == 20
+    assert data["departments"] == 560
+    assert data["beds"] == 320
 
     reset_res = client.post("/api/simulation/reset")
     assert reset_res.status_code == 200

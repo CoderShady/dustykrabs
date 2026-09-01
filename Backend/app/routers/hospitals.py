@@ -25,14 +25,24 @@ def list_hospitals(db: Session = Depends(get_db)):
             svc_min = crud.estimate_service_minutes(db, d)
             wait_sum += crud.estimate_wait_minutes_for_position(d, size, svc_min)
 
-        dept_count = len(h.departments)
-        avg_wait = round(wait_sum / dept_count, 1) if dept_count > 0 else 0.0
+        configured_dept_count = h.department_count if h.department_count is not None else len(h.departments)
+        live_dept_count = len(h.departments)
+        avg_wait = round(wait_sum / live_dept_count, 1) if live_dept_count > 0 else 0.0
         results.append(
             schemas.HospitalSummary(
                 id=h.id,
                 name=h.name,
                 location=h.location,
-                department_count=dept_count,
+                city=h.city,
+                district=h.district,
+                region=h.region,
+                hospital_tier=h.hospital_tier,
+                emergency_24x7=h.emergency_24x7,
+                total_doctors=h.total_doctors,
+                total_inpatient_beds=h.total_inpatient_beds,
+                total_opd_consultation_rooms=h.total_opd_consultation_rooms,
+                daily_opd_token_capacity=h.daily_opd_token_capacity,
+                department_count=configured_dept_count,
                 total_waiting=total_waiting,
                 avg_wait_minutes=avg_wait,
             )
@@ -80,6 +90,16 @@ def get_hospital_detail(hospital_id: str, db: Session = Depends(get_db)):
         id=hospital.id,
         name=hospital.name,
         location=hospital.location,
+        city=hospital.city,
+        district=hospital.district,
+        region=hospital.region,
+        hospital_tier=hospital.hospital_tier,
+        emergency_24x7=hospital.emergency_24x7,
+        total_doctors=hospital.total_doctors,
+        total_inpatient_beds=hospital.total_inpatient_beds,
+        total_opd_consultation_rooms=hospital.total_opd_consultation_rooms,
+        daily_opd_token_capacity=hospital.daily_opd_token_capacity,
+        department_count=hospital.department_count if hospital.department_count is not None else dept_count,
         total_waiting=total_waiting,
         avg_wait_minutes=avg_wait,
         departments=dept_summaries,

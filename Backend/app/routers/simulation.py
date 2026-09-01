@@ -40,8 +40,9 @@ async def run_simulation_tick(db: Session = Depends(get_db)):
     events_emitted = []
 
     # 1. Occasionally add a new patient check-in
-    if random.random() < 0.6:
-        h = random.choice(hospitals)
+    queue_hospitals = [hospital for hospital in hospitals if hospital.departments]
+    if queue_hospitals and random.random() < 0.6:
+        h = random.choice(queue_hospitals)
         dept = random.choice(h.departments)
         q_len = crud.department_queue_size(db, dept)
         if q_len < dept.capacity_threshold + 5:

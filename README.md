@@ -65,7 +65,7 @@ python -m uvicorn app.main:app --port 8000 --reload
 - **Interactive Swagger API Docs**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 - **Alternative ReDoc**: [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc)
 
-Staff Login Credentials (Demo):
+Hospital Login Credentials (Demo):
 - **Username**: `staff`
 - **Password**: `staff123`
 
@@ -102,7 +102,7 @@ python -m pytest tests/ -v
 | `POST` | `/api/beds/{bed_id}/release` | Discharge patient and release bed to available |
 | `GET` | `/api/admin/stats` | Network-wide operational statistics & bed occupancy |
 | `GET` | `/api/admin/alerts` | **Predictive capacity alerts with ETA overflow projection** |
-| `POST` | `/api/auth/staff-login` | Staff authentication |
+| `POST` | `/api/auth/hospital-login` | Hospital portal authentication |
 | `POST` | `/api/simulation/tick` | Trigger a live patient flow step (check-in/service/bed) |
 | `POST` | `/api/simulation/reset` | Re-seed database with clean hospital dataset |
 

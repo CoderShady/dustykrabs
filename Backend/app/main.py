@@ -11,9 +11,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.database import Base, SessionLocal, engine
+from app.database import Base, SessionLocal, engine, ensure_schema
 from app.routers import admin, auth, beds, departments, hospitals, simulation, tokens
-from app.routers.auth import STAFF_COOKIE_NAME, STAFF_SECRET_TOKEN
+from app.routers.auth import HOSPITAL_COOKIE_NAME, HOSPITAL_SECRET_TOKEN
 from app.seed import seed_database
 from app.websocket import manager
 
@@ -23,14 +23,16 @@ FRONTEND_DIR = os.path.join(
 )
 INDEX_HTML = os.path.join(FRONTEND_DIR, "index.html")
 PATIENT_HTML = os.path.join(FRONTEND_DIR, "patient.html")
-STAFF_HTML = os.path.join(FRONTEND_DIR, "staff.html")
-STAFF_LOGIN_HTML = os.path.join(FRONTEND_DIR, "staff_login.html")
+HOSPITAL_HTML = os.path.join(FRONTEND_DIR, "hospital.html")
+HOSPITAL_LOGIN_HTML = os.path.join(FRONTEND_DIR, "hospital_login.html")
+TOKEN_LOOKUP_HTML = os.path.join(FRONTEND_DIR, "token_lookup.html")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize DB tables and seed data if database is empty
     Base.metadata.create_all(bind=engine)
+    ensure_schema()
     db = SessionLocal()
     try:
         seed_database(db)
@@ -49,7 +51,8 @@ app = FastAPI(
 # CORS middleware for local dev and frontend access
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["null"],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -104,33 +107,39 @@ def patient_page():
     return FileResponse(PATIENT_HTML)
 
 
-@app.get("/staff", tags=["Pages"])
-def staff_dashboard_page(request: Request):
+@app.get("/token", tags=["Pages"])
+def token_lookup_page():
+    """Patient-facing digital token lookup page."""
+    return FileResponse(TOKEN_LOOKUP_HTML)
+
+
+@app.get("/hospital", tags=["Pages"])
+def hospital_dashboard_page(request: Request):
     """
-    Dedicated Staff Dashboard Webpage.
+    Dedicated Hospital Dashboard Webpage.
     Guarded by persistent session cookie.
-    If authenticated -> serves staff.html.
-    If unauthenticated -> redirects to /staff/login.
+    If authenticated -> serves hospital.html.
+    If unauthenticated -> redirects to /hospital/login.
     """
-    cookie = request.cookies.get(STAFF_COOKIE_NAME)
-    if cookie == STAFF_SECRET_TOKEN:
-        return FileResponse(STAFF_HTML)
-    return RedirectResponse(url="/staff/login")
+    cookie = request.cookies.get(HOSPITAL_COOKIE_NAME)
+    if cookie == HOSPITAL_SECRET_TOKEN:
+        return FileResponse(HOSPITAL_HTML)
+    return RedirectResponse(url="/hospital/login")
 
 
-@app.get("/staff/login", tags=["Pages"])
-def staff_login_page(request: Request):
+@app.get("/hospital/login", tags=["Pages"])
+def hospital_login_page(request: Request):
     """
-    Dedicated Staff Login Webpage.
-    If already authenticated -> redirects to /staff dashboard.
-    If unauthenticated -> serves staff_login.html.
+    Dedicated Hospital Login Webpage.
+    If already authenticated -> redirects to /hospital dashboard.
+    If unauthenticated -> serves hospital_login.html.
     """
-    cookie = request.cookies.get(STAFF_COOKIE_NAME)
-    if cookie == STAFF_SECRET_TOKEN:
-        return RedirectResponse(url="/staff")
-    return FileResponse(STAFF_LOGIN_HTML)
+    cookie = request.cookies.get(HOSPITAL_COOKIE_NAME)
+    if cookie == HOSPITAL_SECRET_TOKEN:
+        return RedirectResponse(url="/hospital")
+    return RedirectResponse(url="/hospital_login.html")
 
 
-# Mount frontend directory for static assets (style.css, staff.js, patient.js)
+# Mount frontend directory for static assets (style.css, hospital.js, patient.js)
 if os.path.exists(FRONTEND_DIR):
     app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=False), name="frontend")

@@ -202,7 +202,7 @@ def approve_token(db: Session, token: models.Token) -> models.Token:
     if dept is None:
         raise ValueError("Department not found")
 
-    if token.status != "pending_approval":
+    if token.status not in {"pending_approval", "on_hold"}:
         raise ValueError(f"Token cannot be approved from status '{token.status}'")
 
     dept.token_counter += 1
@@ -218,6 +218,16 @@ def approve_token(db: Session, token: models.Token) -> models.Token:
     token.status = "waiting"
     token.queue_position = max_pos + 1
     token.approved_at = models.utcnow()
+    db.commit()
+    db.refresh(token)
+    return token
+
+
+def hold_token(db: Session, token: models.Token) -> models.Token:
+    if token.status != "pending_approval":
+        raise ValueError(f"Token cannot be held from status '{token.status}'")
+
+    token.status = "on_hold"
     db.commit()
     db.refresh(token)
     return token

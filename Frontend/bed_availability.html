@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Bed Availability · OPD Queue System</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body data-insight-page="beds">
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+  <div id="loading-overlay" class="loading-overlay hidden" role="status" aria-live="polite">
+    <div class="spinner" aria-hidden="true"></div>
+    <p id="loading-text">Loading bed availability…</p>
+  </div>
+
+  <header class="app-header">
+    <div class="container header-inner">
+      <a href="./index.html" class="logo-btn" style="text-decoration:none;">
+        <span class="logo-mark" aria-hidden="true">＋</span>
+        <span class="logo-text">OPD Queue &amp; Bed System</span>
+      </a>
+      <nav class="header-nav" aria-label="Main navigation">
+        <a href="./patient.html" class="nav-link" style="text-decoration:none;">Patient Portal</a>
+        <a href="./index.html" class="nav-link" style="text-decoration:none;">Home</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="container insight-page">
+      <a href="./index.html" class="link-back" style="text-decoration:none; display:inline-block;">← Back to Home</a>
+      <div class="insight-hero">
+        <div class="insight-hero-icon" aria-hidden="true">🛏️</div>
+        <div>
+          <p class="eyebrow">Hospital capacity</p>
+          <h1>Live Bed Availability</h1>
+          <p>Search for a hospital to view declared capacity, live tracked occupancy, and its current bed-capacity outlook.</p>
+        </div>
+      </div>
+
+      <section class="card insight-search" aria-labelledby="hospital-search-title">
+        <h2 id="hospital-search-title">Find your hospital</h2>
+        <p class="section-sub">Search by hospital name, city, district, or region.</p>
+        <div class="insight-search-row">
+          <div class="field">
+            <label for="insight-hospital-search">Hospital search</label>
+            <input id="insight-hospital-search" class="input" type="search" placeholder="Try Siliguri, Bankura, Howrah, or South Bengal" autocomplete="off">
+          </div>
+          <button id="clear-insight-search" class="btn btn-outline" type="button">Clear</button>
+        </div>
+        <p id="insight-hospital-status" class="finder-status" aria-live="polite">Loading participating hospitals…</p>
+        <div id="insight-hospital-results" class="insight-hospital-grid"></div>
+      </section>
+
+      <section id="insight-output" class="insight-output hidden" aria-live="polite">
+        <div class="insight-output-head">
+          <div id="insight-hospital-heading"></div>
+          <button id="refresh-insight" class="btn btn-outline btn-sm" type="button">↻ Refresh live data</button>
+        </div>
+        <div id="insight-summary" class="insight-stat-grid"></div>
+        <div id="insight-details"></div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="app-footer"><div class="container"><p>OPD Queuing &amp; Bed System · Live Bed Availability</p></div></footer>
+  <script src="./script.js"></script>
+  <script src="./hospital_insights.js"></script>
+</body>
+</html>

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Patient Portal · OPD Queuing &amp; Live Tracking</title>
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="./style.css">
 </head>
 <body>
 
@@ -19,14 +19,14 @@
 
   <header class="app-header">
     <div class="container header-inner">
-      <a href="/" class="logo-btn" style="text-decoration:none;">
+      <a href="./index.html" class="logo-btn" style="text-decoration:none;">
         <span class="logo-mark" aria-hidden="true">＋</span>
         <span class="logo-text">OPD Queue &amp; Bed System</span>
       </a>
       <nav class="header-nav" aria-label="Main navigation">
-        <a href="/" class="nav-link" style="text-decoration:none;">Home</a>
-        <button id="my-token-nav-btn" class="nav-link hidden" style="color:var(--color-primary); font-weight:600;">My Active Token 🎫</button>
-        <a href="/staff" class="nav-link" style="text-decoration:none;">Staff Portal</a>
+        <a href="./index.html" class="nav-link" style="text-decoration:none;">Home</a>
+        <button id="my-token-nav-btn" class="nav-link hidden" style="color:var(--primary); font-weight:600;">My Active Token 🎫</button>
+        <a href="./hospital_login.html" class="nav-link" style="text-decoration:none;">Hospital Portal</a>
       </nav>
     </div>
   </header>
@@ -36,25 +36,32 @@
 
       <!-- VIEW 1: SELECT HOSPITAL -->
       <section id="p-view-hospitals" class="patient-view active">
-        <a href="/" class="link-back" style="text-decoration:none; display:inline-block; margin-bottom:12px;">← Home</a>
+        <a href="./index.html" class="link-back" style="text-decoration:none; display:inline-block; margin-bottom:12px;">← Home</a>
         <h2>Select a Hospital</h2>
-        <p class="section-sub">Choose a nearby hospital to view live department queues, doctor availability, and request a token.</p>
+        <p class="section-sub">Choose a hospital to see wait times and request a token.</p>
+        <div class="card hospital-search-card">
+          <div class="field" style="margin-bottom:0;">
+            <label for="p-hospital-search">Search by hospital, landmark, or city</label>
+            <input id="p-hospital-search" class="input" type="search" placeholder="Try Salt Lake, Howrah, or a hospital name" autocomplete="off">
+          </div>
+          <p id="p-hospital-search-summary" class="search-summary" aria-live="polite"></p>
+        </div>
         <div id="p-hospital-list" class="grid hospital-grid" style="margin-top:20px;"></div>
       </section>
 
       <!-- VIEW 2: HOSPITAL DETAIL & DEPARTMENTS -->
       <section id="p-view-hospital-detail" class="patient-view hidden">
-        <button class="link-back" onclick="showPatientView('hospitals')">← Back to Hospitals</button>
+        <button class="link-back" data-patient-view="hospitals">← Back to Hospitals</button>
         <div id="p-hospital-detail-header" class="hospital-detail-header" style="margin-top:12px;"></div>
         <h3 class="section-heading" style="margin-top:24px;">OPD Departments</h3>
-        <p class="section-sub">Pick a department to view current wait estimates and get your token.</p>
+        <p class="section-sub">Pick a department to see the wait and get your token.</p>
         <div id="p-department-list" class="grid department-grid" style="margin-top:16px;"></div>
       </section>
 
       <!-- VIEW 3: TOKEN CHECK-IN FORM -->
       <section id="p-view-token-form" class="patient-view hidden">
         <div class="narrow">
-          <button class="link-back" onclick="showPatientView('hospital-detail')">← Back</button>
+          <button class="link-back" data-patient-view="hospital-detail">← Back</button>
           <h2 style="margin-top:12px;">Get Your Digital Token</h2>
           <p id="p-tf-context" class="section-sub"></p>
 
@@ -63,40 +70,30 @@
 
             <div class="field">
               <label for="p-tf-name">Full Name</label>
-              <input type="text" id="p-tf-name" placeholder="e.g. Ramesh Kumar" required>
-            </div>
-
-            <div class="form-row">
-              <div class="field">
-                <label for="p-tf-age">Age</label>
-                <input type="number" id="p-tf-age" min="1" max="120" placeholder="32" required>
-              </div>
-              <div class="field">
-                <label for="p-tf-gender">Gender</label>
-                <select id="p-tf-gender" required>
-                  <option value="">Select</option>
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                  <option value="Other">Other</option>
-                </select>
-              </div>
+              <input type="text" id="p-tf-name" class="input" placeholder="e.g. Ramesh Kumar" autocomplete="name" required>
             </div>
 
             <div class="field">
-              <label for="p-tf-phone">Phone Number (for SMS &amp; Queue Alerts)</label>
-              <input type="tel" id="p-tf-phone" placeholder="10-digit mobile" maxlength="10" required>
+              <label for="p-tf-phone">Contact Number</label>
+              <input type="tel" id="p-tf-phone" class="input" placeholder="10-digit mobile" maxlength="10" autocomplete="tel" required>
             </div>
 
             <div class="field">
               <label for="p-tf-department">Department</label>
-              <select id="p-tf-department" required></select>
+              <select id="p-tf-department" class="input" required></select>
+            </div>
+
+            <div class="field">
+              <label for="p-tf-token-time">Token Time</label>
+              <input type="datetime-local" id="p-tf-token-time" class="input" readonly>
+              <span class="field-help">Your place in line starts as soon as the token is created.</span>
             </div>
 
             <button type="submit" id="p-tf-submit" class="btn btn-primary btn-block btn-lg" style="margin-top:20px;">
-              Submit Request for Approval →
+              Generate My Token →
             </button>
             <p class="form-help" style="margin-top:10px; text-align:center;">
-              Staff at reception will verify your request and issue your official token number.
+              Your token number and wait time will appear right away.
             </p>
           </form>
         </div>
@@ -105,7 +102,7 @@
       <!-- VIEW 4: LIVE TOKEN TRACKER -->
       <section id="p-view-tracker" class="patient-view hidden">
         <div class="narrow">
-          <button class="link-back" onclick="showPatientView('hospitals')">← Back to Hospitals</button>
+          <button class="link-back" data-patient-view="hospitals">← Back to Hospitals</button>
           <div id="p-tracker-content" style="margin-top:16px;"></div>
         </div>
       </section>
@@ -119,6 +116,7 @@
     </div>
   </footer>
 
-  <script src="/patient.js"></script>
+  <script src="./script.js"></script>
+  <script src="./patient.js"></script>
 </body>
 </html>

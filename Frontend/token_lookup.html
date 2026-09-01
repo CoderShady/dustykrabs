@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Digital Token Approvals · OPD Queue &amp; Bed System</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <div id="loading-overlay" class="loading-overlay hidden" role="status" aria-live="polite">
+    <div class="spinner" aria-hidden="true"></div>
+    <p id="loading-text">Loading…</p>
+  </div>
+
+  <header class="app-header">
+    <div class="container header-inner">
+      <a href="./index.html" class="logo-btn" style="text-decoration:none;">
+        <span class="logo-mark" aria-hidden="true">＋</span>
+        <span class="logo-text">OPD Queue &amp; Bed System</span>
+      </a>
+      <nav class="header-nav" aria-label="Main navigation">
+        <a href="./patient.html" class="nav-link" style="text-decoration:none;">Patient Portal</a>
+        <a href="./hospital_login.html" class="nav-link" style="text-decoration:none;">Hospital Login</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="container insight-page">
+      <a href="./index.html" class="link-back" style="text-decoration:none; display:inline-block;">← Back to Home</a>
+      <div class="insight-hero">
+        <div class="insight-hero-icon" aria-hidden="true">🎫</div>
+        <div>
+          <p class="eyebrow">Digital token approval</p>
+          <h1>Digital Token Approvals</h1>
+          <p>Search for your hospital first, then select the department and retrieve your approved digital token.</p>
+        </div>
+      </div>
+
+      <section class="card insight-search" aria-labelledby="hospital-search-title">
+        <h2 id="hospital-search-title">Find your hospital</h2>
+        <p class="section-sub">Search by hospital name, city, district, or region.</p>
+        <div class="insight-search-row">
+          <div class="field">
+            <label for="token-hospital-search">Hospital search</label>
+            <input id="token-hospital-search" class="input" type="search" placeholder="Try Kolkata, Howrah, Nadia, or North Bengal" autocomplete="off">
+          </div>
+          <button id="clear-token-hospital-search" class="btn btn-outline" type="button">Clear</button>
+        </div>
+        <p id="token-hospital-status" class="finder-status" aria-live="polite">Loading participating hospitals…</p>
+        <div id="token-hospital-results" class="insight-hospital-grid"></div>
+      </section>
+
+      <section id="token-workspace" class="insight-output hidden" aria-live="polite">
+        <div class="insight-output-head">
+          <div id="token-hospital-heading"></div>
+          <a href="./patient.html" class="btn btn-outline btn-sm" style="text-decoration:none;">Need a token? Request one →</a>
+        </div>
+
+        <div id="token-hospital-summary" class="insight-stat-grid"></div>
+
+        <div class="token-approval-steps" aria-label="Token approval process">
+          <div><span>1</span><strong>Request</strong><small>Submit details through the Patient Portal</small></div>
+          <div><span>2</span><strong>Approval</strong><small>The hospital verifies and issues a number</small></div>
+          <div><span>3</span><strong>Track</strong><small>Find the approved token and follow your queue</small></div>
+        </div>
+
+        <div class="token-lookup-layout">
+          <div class="card token-lookup-form-wrap">
+            <p class="eyebrow">Approved token lookup</p>
+            <h2>Find your digital token</h2>
+            <p class="section-sub">Choose the department and enter the number issued by the hospital.</p>
+            <form id="token-lookup-form" novalidate>
+              <div id="token-lookup-error" class="form-error hidden" role="alert"></div>
+
+              <div class="field">
+                <label for="token-department">Department</label>
+                <select id="token-department" class="input" required></select>
+              </div>
+
+              <div class="field">
+                <label for="token-number">Token Number</label>
+                <input id="token-number" class="input" type="text" placeholder="Example: A-004" autocomplete="off" required>
+                <span class="field-help">Enter the approved number exactly as issued by the hospital.</span>
+              </div>
+
+              <button id="find-token-btn" class="btn btn-primary btn-block" type="submit">Show Digital Token →</button>
+            </form>
+
+            <div style="margin-top:18px; padding-top:18px; border-top:1px solid var(--border);">
+              <p style="font-size:0.88rem; color:var(--text-muted);">Hospital reception can verify requests and issue approved token numbers.</p>
+              <a href="./hospital_login.html" class="btn btn-outline btn-block btn-sm" style="text-decoration:none; margin-top:12px;">Hospital Login →</a>
+            </div>
+          </div>
+
+          <div id="token-copy-container">
+            <div class="card empty-state">
+              <div class="empty-icon">🎫</div>
+              <h3>Your approved token will appear here</h3>
+              <p>Enter the department and token number to see live status, patients ahead, and predicted wait.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <div class="container">
+      <p>OPD Queue &amp; Bed System · Digital Token Approvals</p>
+    </div>
+  </footer>
+
+  <script src="./script.js"></script>
+  <script src="./token_lookup.js"></script>
+</body>
+</html>

@@ -1,415 +1,545 @@
 /**
- * Patient Portal Script (SIH1620)
- * Handles Hospital Selection, Digital Check-in Requests, Real-Time Token Tracking,
- * and Live WebSocket Alerts.
+ * Patient portal controller.
+ * Handles hospital browsing, token requests, live tracking, and queue events.
  */
 
 'use strict';
 
-const API_BASE = '/api';
+(function createPatientPortal() {
+  const {
+    ApiError,
+    api,
+    byId,
+    clearFormError,
+    connectWebSocket,
+    escapeHtml,
+    hideLoading,
+    showFormError,
+    showLoading,
+    showToast,
+  } = window.OPD;
 
-const state = {
-  hospitals: [],
-  selectedHospital: null,
-  selectedDepartmentId: null,
-  myTokenId: localStorage.getItem('opd_patient_token') || null,
-  myToken: null,
-};
+  const TOKEN_STORAGE_KEY = 'opd_patient_token';
 
-let socket = null;
-
-/* ================= UTILS & TOASTS ================= */
-
-function showToast(message, type) {
-  const container = document.getElementById('toast-container');
-  if (!container) return;
-  const el = document.createElement('div');
-  el.className = `toast toast-${type || 'info'}`;
-  el.textContent = message;
-  container.appendChild(el);
-  setTimeout(() => { el.remove(); }, 3500);
-}
-
-function showLoadingOverlay(msg) {
-  const overlay = document.getElementById('loading-overlay');
-  const txt = document.getElementById('loading-text');
-  if (txt) txt.textContent = msg || 'Loading…';
-  if (overlay) overlay.classList.remove('hidden');
-}
-
-function hideLoadingOverlay() {
-  const overlay = document.getElementById('loading-overlay');
-  if (overlay) overlay.classList.add('hidden');
-}
-
-function escapeHtml(str) {
-  if (str == null) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-/* ================= VIEW SWITCHER ================= */
-
-window.showPatientView = function(viewName) {
-  const views = {
-    'hospitals': document.getElementById('p-view-hospitals'),
-    'hospital-detail': document.getElementById('p-view-hospital-detail'),
-    'token-form': document.getElementById('p-view-token-form'),
-    'tracker': document.getElementById('p-view-tracker'),
+  const state = {
+    hospitals: [],
+    hospitalDetails: new Map(),
+    selectedHospital: null,
+    selectedDepartmentId: null,
+    myTokenId: localStorage.getItem(TOKEN_STORAGE_KEY),
+    myToken: null,
   };
 
-  Object.values(views).forEach(v => {
-    if (v) {
-      v.classList.remove('active');
-      v.classList.add('hidden');
+  function showPatientView(viewName) {
+    const views = {
+      hospitals: byId('p-view-hospitals'),
+      'hospital-detail': byId('p-view-hospital-detail'),
+      'token-form': byId('p-view-token-form'),
+      tracker: byId('p-view-tracker'),
+    };
+
+    Object.values(views).forEach((view) => {
+      view?.classList.remove('active');
+      view?.classList.add('hidden');
+    });
+
+    views[viewName]?.classList.remove('hidden');
+    views[viewName]?.classList.add('active');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    if (viewName === 'hospitals') renderHospitals();
+  }
+
+  async function fetchHospitals() {
+    state.hospitals = await api.get('/hospitals');
+    renderHospitals();
+  }
+
+  function renderHospitals() {
+    const list = byId('p-hospital-list');
+    const summary = byId('p-hospital-search-summary');
+    const searchText = byId('p-hospital-search')?.value.trim().toLowerCase() || '';
+    if (!list) return;
+
+    const hospitals = state.hospitals.filter((hospital) => (
+      `${hospital.name} ${hospital.location}`.toLowerCase().includes(searchText)
+    ));
+
+    if (summary) {
+      summary.textContent = searchText
+        ? `${hospitals.length} hospital${hospitals.length === 1 ? '' : 's'} found`
+        : `${hospitals.length} participating hospitals`;
     }
-  });
 
-  const target = views[viewName];
-  if (target) {
-    target.classList.remove('hidden');
-    target.classList.add('active');
-  }
-
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-
-  if (viewName === 'hospitals') renderHospitals();
-  if (viewName === 'tracker' && state.myTokenId) fetchAndRenderToken(state.myTokenId);
-};
-
-/* ================= WEBSOCKET ================= */
-
-function initWebSocket() {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${protocol}//${window.location.host}/ws`;
-
-  try {
-    socket = new WebSocket(wsUrl);
-    socket.onopen = () => {
-      console.log('Patient WebSocket connected.');
-    };
-    socket.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        handleWsEvent(msg);
-      } catch (e) {}
-    };
-    socket.onclose = () => {
-      setTimeout(initWebSocket, 3000);
-    };
-  } catch (e) {
-    console.warn('Patient WebSocket init failed:', e);
-  }
-}
-
-function handleWsEvent(msg) {
-  const event = msg.event;
-  const data = msg.data || {};
-
-  if (event === 'token_approved' && state.myTokenId && data.token_id === state.myTokenId) {
-    showToast(`Your token request has been approved! Assigned Number: ${data.number}`, 'success');
-    fetchAndRenderToken(state.myTokenId);
-  } else if (event === 'token_called' && state.myTokenId && data.token_id === state.myTokenId) {
-    showToast(`🔔 It is your turn! Token ${data.token_number} is called at counter.`, 'success');
-    fetchAndRenderToken(state.myTokenId);
-  } else if (event === 'patient_alert' && state.myTokenId && data.token_id === state.myTokenId) {
-    showToast(`⚠️ Get ready! You are next in line.`, 'warning');
-    fetchAndRenderToken(state.myTokenId);
-  } else if (event === 'queue_update') {
-    if (state.myTokenId) fetchAndRenderToken(state.myTokenId);
-    if (state.selectedHospital) renderHospitalDetail(state.selectedHospital.id);
-  }
-}
-
-/* ================= HOSPITALS & DEPARTMENTS ================= */
-
-async function fetchHospitals() {
-  try {
-    const res = await fetch(`${API_BASE}/hospitals`);
-    if (res.ok) {
-      state.hospitals = await res.json();
-      renderHospitals();
+    if (!hospitals.length) {
+      list.innerHTML = `<div class="empty-row">${searchText ? 'No hospitals match that search.' : 'No hospitals are currently available.'}</div>`;
+      return;
     }
-  } catch (err) {
-    console.error('Fetch hospitals error:', err);
-  }
-}
 
-function renderHospitals() {
-  const list = document.getElementById('p-hospital-list');
-  if (!list) return;
-
-  list.innerHTML = state.hospitals.map(h => {
-    const totalQueue = h.departments ? h.departments.reduce((sum, d) => sum + (d.queue_size || 0), 0) : 0;
-    return `
-      <div class="card hospital-card" onclick="selectHospital('${h.id}')" style="cursor:pointer;">
-        <h3>${escapeHtml(h.name)}</h3>
-        <p class="hospital-location">📍 ${escapeHtml(h.location)}</p>
-        <div class="hospital-metrics">
-          <span>${h.departments ? h.departments.length : 0} Departments</span>
-          <span class="badge badge-${totalQueue > 15 ? 'warning' : 'ok'}">${totalQueue} Patients Waiting</span>
+    list.innerHTML = hospitals.map((hospital) => `
+      <div
+        class="card hospital-card"
+        data-hospital-id="${escapeHtml(hospital.id)}"
+        role="button"
+        tabindex="0"
+        style="cursor:pointer;"
+      >
+        <h3>${escapeHtml(hospital.name)}</h3>
+        <p class="hospital-location location">📍 ${escapeHtml(hospital.location)}</p>
+        <div class="hospital-metrics stat-row">
+          <span>${hospital.department_count || 0} Departments</span>
+          <span>About ${hospital.avg_wait_minutes || 0} min average wait</span>
+          <span class="badge badge-${hospital.total_waiting > 15 ? 'warning' : 'ok'}">
+            ${hospital.total_waiting || 0} Patients Waiting
+          </span>
         </div>
-        <button class="btn btn-primary btn-block" style="margin-top:16px;">View Departments &amp; Queues →</button>
+        <button class="btn btn-primary btn-block" style="margin-top:16px;">
+          View Departments &amp; Queues →
+        </button>
       </div>
-    `;
-  }).join('');
-}
-
-window.selectHospital = function(hospitalId) {
-  const hospital = state.hospitals.find(h => h.id === hospitalId);
-  if (!hospital) return;
-  state.selectedHospital = hospital;
-  renderHospitalDetail(hospitalId);
-  showPatientView('hospital-detail');
-};
-
-async function renderHospitalDetail(hospitalId) {
-  try {
-    const res = await fetch(`${API_BASE}/hospitals/${hospitalId}`);
-    if (!res.ok) return;
-    const h = await res.json();
-    state.selectedHospital = h;
-
-    const header = document.getElementById('p-hospital-detail-header');
-    if (header) {
-      header.innerHTML = `
-        <h2>${escapeHtml(h.name)}</h2>
-        <p class="hospital-location" style="margin-top:4px;">📍 ${escapeHtml(h.location)}</p>
-      `;
-    }
-
-    const deptList = document.getElementById('p-department-list');
-    if (deptList && h.departments) {
-      deptList.innerHTML = h.departments.map(d => {
-        return `
-          <div class="card dept-card">
-            <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-              <div>
-                <h4 style="margin:0; font-size:18px;">${escapeHtml(d.name)}</h4>
-                <p style="font-size:13px; color:var(--color-text-secondary); margin-top:2px;">
-                  Active Counters: ${d.num_counters} · ~${d.avg_service_time} min/patient
-                </p>
-              </div>
-              <span class="badge badge-${d.queue_size > d.capacity_threshold ? 'warning' : 'ok'}">
-                ${d.queue_size} in queue
-              </span>
-            </div>
-
-            <div class="dept-stats" style="margin:16px 0; display:flex; gap:16px; font-size:14px;">
-              <div><strong>Est. Wait:</strong> ~${d.expected_wait_minutes || 0} min</div>
-              <div><strong>Serving:</strong> ${d.current_token_number ? escapeHtml(d.current_token_number) : '—'}</div>
-            </div>
-
-            <button class="btn btn-primary btn-block" onclick="openTokenForm('${h.id}', '${d.id}')">
-              Get Digital Token →
-            </button>
-          </div>
-        `;
-      }).join('');
-    }
-  } catch (err) {
-    console.error('Render hospital detail error:', err);
-  }
-}
-
-/* ================= TOKEN FORM ================= */
-
-window.openTokenForm = function(hospitalId, departmentId) {
-  state.selectedDepartmentId = departmentId;
-  const hospital = state.hospitals.find(h => h.id === hospitalId);
-  const deptSelect = document.getElementById('p-tf-department');
-  const contextEl = document.getElementById('p-tf-context');
-
-  if (hospital && deptSelect) {
-    if (contextEl) contextEl.textContent = `${hospital.name}`;
-    deptSelect.innerHTML = hospital.departments.map(d => `
-      <option value="${d.id}" ${d.id === departmentId ? 'selected' : ''}>${escapeHtml(d.name)}</option>
     `).join('');
   }
 
-  showPatientView('token-form');
-};
-
-/* ================= LIVE TOKEN TRACKER ================= */
-
-async function fetchAndRenderToken(tokenId) {
-  if (!tokenId) return;
-
-  try {
-    const res = await fetch(`${API_BASE}/tokens/${tokenId}`);
-    if (res.ok) {
-      const tok = await res.json();
-      state.myToken = tok;
-      renderTrackerUI(tok);
-
-      const navBtn = document.getElementById('my-token-nav-btn');
-      if (navBtn) {
-        navBtn.classList.remove('hidden');
-        navBtn.textContent = `My Token: ${tok.number || 'Pending'} 🎫`;
-      }
+  async function loadHospitalDetails(hospitalId, forceRefresh = false) {
+    if (!forceRefresh && state.hospitalDetails.has(hospitalId)) {
+      return state.hospitalDetails.get(hospitalId);
     }
-  } catch (err) {
-    console.error('Fetch token error:', err);
+
+    const hospital = await api.get(`/hospitals/${encodeURIComponent(hospitalId)}`);
+    const departments = await Promise.all(hospital.departments.map(async (department) => {
+      try {
+        const metrics = await api.get(
+          `/hospitals/${encodeURIComponent(hospitalId)}/departments/${encodeURIComponent(department.id)}/metrics`,
+        );
+        const averageServiceMinutes = metrics.mu_per_hour > 0 ? 60 / metrics.mu_per_hour : 0;
+        return { ...department, averageServiceMinutes };
+      } catch (error) {
+        console.warn(`Unable to load metrics for department ${department.id}.`, error);
+        return { ...department, averageServiceMinutes: 0 };
+      }
+    }));
+
+    const detailedHospital = { ...hospital, departments };
+    state.hospitalDetails.set(hospitalId, detailedHospital);
+    return detailedHospital;
   }
-}
 
-function renderTrackerUI(token) {
-  const container = document.getElementById('p-tracker-content');
-  if (!container) return;
+  function renderHospitalDetails(hospital) {
+    const header = byId('p-hospital-detail-header');
+    const departmentList = byId('p-department-list');
 
-  if (token.status === 'pending_approval') {
-    container.innerHTML = `
-      <div class="card token-result-card" style="text-align:center; padding:36px 20px; border-top:5px solid var(--color-warning);">
-        <div class="badge badge-pending_approval" style="font-size:14px; padding:6px 14px;">⏳ AWAITING APPROVAL</div>
-        <h2 style="margin:16px 0 8px;">Check-in Request Under Review</h2>
-        <p style="color:var(--color-text-secondary); max-width:400px; margin:0 auto 20px;">
-          Your request for <strong>${escapeHtml(token.patient_name)}</strong> has been received by hospital reception. Please wait while staff verify and assign your token number.
+    if (header) {
+      header.innerHTML = `
+        <h2>${escapeHtml(hospital.name)}</h2>
+        <p class="hospital-location location" style="margin-top:4px;">
+          📍 ${escapeHtml(hospital.location)}
         </p>
-        <div style="background:var(--color-bg-secondary); border-radius:8px; padding:16px; max-width:360px; margin:0 auto; text-align:left; font-size:14px;">
-          <div><strong>Patient:</strong> ${escapeHtml(token.patient_name)} (${token.age} yrs, ${token.gender})</div>
+      `;
+    }
+
+    if (!departmentList) return;
+
+    departmentList.innerHTML = hospital.departments.map((department) => `
+      <div class="card department-card">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+          <div>
+            <h4 style="margin:0; font-size:18px;">${escapeHtml(department.name)}</h4>
+            <p style="font-size:13px; color:var(--text-muted); margin-top:2px;">
+              Open counters: ${department.num_counters} · About ${department.averageServiceMinutes.toFixed(1)} minutes per visit
+            </p>
+          </div>
+          <span class="badge badge-${department.queue_size > 15 ? 'warning' : 'ok'}">
+            ${department.queue_size} in queue
+          </span>
+        </div>
+
+        <div class="dept-stats" style="margin:16px 0; display:flex; gap:16px; font-size:14px;">
+          <div><strong>Expected wait:</strong> about ${department.estimated_wait_minutes || 0} min</div>
+          <div><strong>Serving:</strong> ${escapeHtml(department.now_serving || '—')}</div>
+        </div>
+
+        <button
+          class="btn btn-primary btn-block"
+          data-token-hospital="${escapeHtml(hospital.id)}"
+          data-token-department="${escapeHtml(department.id)}"
+        >
+          Get Digital Token →
+        </button>
+      </div>
+    `).join('');
+  }
+
+  async function selectHospital(hospitalId) {
+    showLoading('Loading hospital queues…');
+
+    try {
+      const hospital = await loadHospitalDetails(hospitalId, true);
+      state.selectedHospital = hospital;
+      renderHospitalDetails(hospital);
+      showPatientView('hospital-detail');
+    } catch (error) {
+      console.error('Unable to load hospital details.', error);
+      showToast(error.message || 'Could not load this hospital.', 'warning');
+    } finally {
+      hideLoading();
+    }
+  }
+
+  async function openTokenForm(hospitalId, departmentId) {
+    let hospital = state.hospitalDetails.get(hospitalId);
+
+    try {
+      if (!hospital) hospital = await loadHospitalDetails(hospitalId);
+    } catch (error) {
+      console.error('Unable to prepare the token form.', error);
+      showToast(error.message || 'Could not load department details.', 'warning');
+      return;
+    }
+
+    state.selectedHospital = hospital;
+    state.selectedDepartmentId = departmentId;
+
+    const departmentSelect = byId('p-tf-department');
+    const context = byId('p-tf-context');
+    const selectedDepartment = hospital.departments.find((department) => department.id === departmentId);
+
+    if (context) {
+      context.textContent = selectedDepartment
+        ? `${hospital.name} · ${selectedDepartment.name}`
+        : hospital.name;
+    }
+    if (departmentSelect) {
+      departmentSelect.innerHTML = hospital.departments.map((department) => `
+        <option value="${escapeHtml(department.id)}" ${department.id === departmentId ? 'selected' : ''}>
+          ${escapeHtml(department.name)}
+        </option>
+      `).join('');
+    }
+
+    const tokenTime = byId('p-tf-token-time');
+    if (tokenTime) {
+      const now = new Date();
+      now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+      tokenTime.value = now.toISOString().slice(0, 16);
+    }
+
+    showPatientView('token-form');
+  }
+
+  function formatTokenTime(value) {
+    const date = value ? new Date(value) : new Date();
+    if (Number.isNaN(date.getTime())) return 'Just now';
+
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }).format(date);
+  }
+
+  function updateTokenNavigation(token) {
+    const navigationButton = byId('my-token-nav-btn');
+    if (!navigationButton) return;
+
+    navigationButton.classList.remove('hidden');
+    navigationButton.textContent = `My Token: ${token.number || 'Pending'} 🎫`;
+  }
+
+  function clearSavedToken() {
+    state.myTokenId = null;
+    state.myToken = null;
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    byId('my-token-nav-btn')?.classList.add('hidden');
+  }
+
+  async function fetchAndRenderToken(tokenId) {
+    if (!tokenId) return false;
+
+    try {
+      const token = await api.get(`/tokens/${encodeURIComponent(tokenId)}`);
+      if (!state.hospitalDetails.has(token.hospital_id)) {
+        try {
+          await loadHospitalDetails(token.hospital_id);
+        } catch (hospitalError) {
+          console.warn('Unable to load the token hospital details.', hospitalError);
+        }
+      }
+      state.myToken = token;
+      renderTracker(token);
+      updateTokenNavigation(token);
+      return true;
+    } catch (error) {
+      console.error('Unable to load the saved token.', error);
+
+      if (error instanceof ApiError && error.status === 404) {
+        clearSavedToken();
+        showToast('Your saved token is no longer available.', 'warning');
+        showPatientView('hospitals');
+      }
+      return false;
+    }
+  }
+
+  function renderPendingTracker(token) {
+    const isOnHold = token.status === 'on_hold';
+    return `
+      <div class="card token-result-card" style="text-align:center; padding:36px 20px; border-top:5px solid var(--warning);">
+        <div class="badge badge-${isOnHold ? 'on_hold' : 'pending_approval'}" style="font-size:14px; padding:6px 14px;">
+          ${isOnHold ? '⏸ ON HOLD' : '⏳ AWAITING APPROVAL'}
+        </div>
+        <h2 style="margin:16px 0 8px;">${isOnHold ? 'Check-in Request Kept on Hold' : 'Check-in Request Under Review'}</h2>
+        <p style="color:var(--text-muted); max-width:400px; margin:0 auto 20px;">
+          We received the request for <strong>${escapeHtml(token.patient_name)}</strong>.
+          ${isOnHold ? 'Reception will review it again before adding it to the queue.' : 'Staff will send the token number soon.'}
+        </p>
+        <div style="background:var(--surface-sunken); border-radius:8px; padding:16px; max-width:360px; margin:0 auto; text-align:left; font-size:14px;">
+          <div><strong>Patient:</strong> ${escapeHtml(token.patient_name)} (${token.age} yrs, ${escapeHtml(token.gender)})</div>
           <div style="margin-top:6px;"><strong>Phone:</strong> ${escapeHtml(token.phone)}</div>
           <div style="margin-top:6px;"><strong>Time:</strong> Just now</div>
         </div>
-        <p style="margin-top:20px; font-size:13px; color:var(--color-text-tertiary);">
+        <p style="margin-top:20px; font-size:13px; color:var(--text-faint);">
           ⚡ This page updates automatically the moment reception staff clicks approve.
         </p>
       </div>
     `;
-    return;
   }
 
-  if (token.status === 'rejected') {
-    container.innerHTML = `
-      <div class="card token-result-card" style="text-align:center; padding:36px 20px; border-top:5px solid var(--color-danger);">
-        <div class="badge badge-danger" style="font-size:14px; padding:6px 14px;">✕ REQUEST REJECTED</div>
+  function renderRejectedTracker(token) {
+    return `
+      <div class="card token-result-card" style="text-align:center; padding:36px 20px; border-top:5px solid var(--danger);">
+        <div class="badge badge-rejected" style="font-size:14px; padding:6px 14px;">✕ REQUEST REJECTED</div>
         <h2 style="margin:16px 0 8px;">Request Could Not Be Approved</h2>
-        <p style="color:var(--color-text-secondary); max-width:400px; margin:0 auto 20px;">
-          ${escapeHtml(token.rejection_reason || 'Department capacity exceeded or patient details invalid.')}
+        <p style="color:var(--text-muted); max-width:400px; margin:0 auto 20px;">
+          ${escapeHtml(token.rejection_reason || 'The department is full or some details need correction.')}
         </p>
-        <button class="btn btn-primary" onclick="showPatientView('hospitals')">Choose Another Department / Hospital</button>
+        <button class="btn btn-primary" data-patient-view="hospitals">
+          Choose Another Department / Hospital
+        </button>
       </div>
     `;
-    return;
   }
 
-  // Approved active token board
-  const isCalled = token.status === 'called';
-  const isCompleted = token.status === 'completed';
+  function renderActiveTracker(token) {
+    const isCalled = token.status === 'called';
+    const isCompleted = token.status === 'completed';
+    const statusLabel = String(token.status).replaceAll('_', ' ').toUpperCase();
+    const hospital = state.hospitalDetails.get(token.hospital_id) || state.selectedHospital;
+    const department = hospital?.departments?.find((item) => item.id === token.department_id);
+    const careLocation = [hospital?.name, department?.name].filter(Boolean).join(' · ');
 
-  container.innerHTML = `
-    <div class="card token-result-card" style="text-align:center; padding:32px 20px; border-top: 5px solid ${isCalled ? 'var(--color-success)' : 'var(--color-primary)'};">
-      <span class="badge badge-${token.status}" style="font-size:14px; padding:6px 14px;">${token.status.toUpperCase()}</span>
-      <div class="token-number-hero" style="font-size:56px; font-weight:800; color:var(--color-primary); margin:12px 0;">
-        ${escapeHtml(token.number)}
+    let statusContent = `
+      <div class="tracker-metrics-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:24px 0;">
+        <div class="card" style="background:var(--surface-sunken); padding:16px;">
+          <div style="font-size:32px; font-weight:700; color:var(--primary);">${token.ahead ?? 0}</div>
+          <div style="font-size:13px; color:var(--text-muted);">Patients Ahead of You</div>
+        </div>
+        <div class="card" style="background:var(--surface-sunken); padding:16px;">
+          <div style="font-size:32px; font-weight:700; color:var(--success);">~${token.wait_minutes ?? 0}</div>
+          <div style="font-size:13px; color:var(--text-muted);">Estimated Wait (min)</div>
+        </div>
       </div>
-      <h3 style="margin:0;">${escapeHtml(token.patient_name)}</h3>
-      <p style="color:var(--color-text-secondary); margin-top:4px;">${token.age} yrs · ${token.gender} · 📞 ${escapeHtml(token.phone)}</p>
+    `;
 
-      ${isCalled ? `
-        <div class="alert-item alert-critical" style="margin:24px 0; background:rgba(34, 197, 94, 0.15); border-color:var(--color-success); text-align:center;">
-          <h3 style="color:var(--color-success); margin:0;">🔔 It's Your Turn!</h3>
+    if (isCalled) {
+      statusContent = `
+        <div class="alert-item alert-critical" style="margin:24px 0; background:rgba(34, 197, 94, 0.15); border-color:var(--success); text-align:center;">
+          <h3 style="color:var(--success); margin:0;">🔔 It's Your Turn!</h3>
           <p style="margin-top:4px;">Please proceed directly to the doctor's consultation counter.</p>
         </div>
-      ` : isCompleted ? `
-        <div class="alert-item" style="margin:24px 0; background:var(--color-bg-secondary); text-align:center;">
+      `;
+    } else if (isCompleted) {
+      statusContent = `
+        <div class="alert-item" style="margin:24px 0; background:var(--surface-sunken); text-align:center;">
           <h3 style="margin:0;">✓ Consultation Finished</h3>
           <p style="margin-top:4px;">Thank you for visiting. Have a healthy day!</p>
         </div>
-      ` : `
-        <div class="tracker-metrics-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:24px 0;">
-          <div class="card" style="background:var(--color-bg-secondary); padding:16px;">
-            <div style="font-size:32px; font-weight:700; color:var(--color-primary);">${token.ahead != null ? token.ahead : 0}</div>
-            <div style="font-size:13px; color:var(--color-text-secondary);">Patients Ahead of You</div>
-          </div>
-          <div class="card" style="background:var(--color-bg-secondary); padding:16px;">
-            <div style="font-size:32px; font-weight:700; color:var(--color-success);">~${token.wait_minutes != null ? token.wait_minutes : 0}</div>
-            <div style="font-size:13px; color:var(--color-text-secondary);">Estimated Wait (min)</div>
-          </div>
+      `;
+    }
+
+    return `
+      <div class="card token-result-card" style="text-align:center; padding:32px 20px; border-top:5px solid ${isCalled ? 'var(--success)' : 'var(--primary)'};">
+        <span class="badge badge-${escapeHtml(token.status)}" style="font-size:14px; padding:6px 14px;">${escapeHtml(statusLabel)}</span>
+        <div class="token-number-hero" style="font-size:56px; font-weight:800; color:var(--primary); margin:12px 0;">
+          ${escapeHtml(token.number || 'Pending')}
         </div>
-      `}
+        <h3 style="margin:0;">${escapeHtml(token.patient_name)}</h3>
+        ${careLocation ? `<p style="font-weight:700; margin-top:6px;">${escapeHtml(careLocation)}</p>` : ''}
+        <p style="color:var(--text-muted); margin-top:4px;">📞 ${escapeHtml(token.phone)} · Created ${escapeHtml(formatTokenTime(token.created_at))}</p>
 
-      <div style="margin-top:20px;">
-        <button class="btn btn-outline btn-sm" onclick="showPatientView('hospitals')">← View Hospital List</button>
+        ${statusContent}
+
+        <div style="margin-top:20px;">
+          <button class="btn btn-outline btn-sm" data-patient-view="hospitals">← View Hospital List</button>
+        </div>
       </div>
-    </div>
-  `;
-}
-
-/* ================= EVENT LISTENERS ================= */
-
-document.addEventListener('DOMContentLoaded', async function() {
-  await fetchHospitals();
-  initWebSocket();
-
-  // If patient has saved active token, open tracker directly!
-  if (state.myTokenId) {
-    showPatientView('tracker');
-    fetchAndRenderToken(state.myTokenId);
-  } else {
-    showPatientView('hospitals');
+    `;
   }
 
-  // My Active Token navbar button
-  document.getElementById('my-token-nav-btn')?.addEventListener('click', () => {
-    showPatientView('tracker');
-  });
+  function renderTracker(token) {
+    const container = byId('p-tracker-content');
+    if (!container) return;
 
-  // Token Check-in Form submit
-  const form = document.getElementById('p-token-form');
-  if (form) {
-    form.addEventListener('submit', async function(e) {
-      e.preventDefault();
-      const name = document.getElementById('p-tf-name').value.trim();
-      const age = document.getElementById('p-tf-age').value;
-      const gender = document.getElementById('p-tf-gender').value;
-      const phone = document.getElementById('p-tf-phone').value.trim();
-      const departmentId = document.getElementById('p-tf-department').value;
-      const errorEl = document.getElementById('p-tf-error');
-
-      if (!name || !age || Number(age) <= 0 || !gender || !phone || !departmentId) {
-        errorEl.textContent = 'Please fill in all fields with valid information.';
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      errorEl.classList.add('hidden');
-      showLoadingOverlay('Submitting check-in request…');
-
-      const hospitalId = state.selectedHospital ? state.selectedHospital.id : 'h1';
-
-      try {
-        const res = await fetch(`${API_BASE}/tokens/request`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            hospital_id: hospitalId,
-            department_id: departmentId,
-            patient_name: name,
-            age: Number(age),
-            gender: gender,
-            phone: phone,
-          }),
-        });
-        hideLoadingOverlay();
-        if (res.ok) {
-          const tok = await res.json();
-          state.myTokenId = tok.id;
-          state.myToken = tok;
-          localStorage.setItem('opd_patient_token', tok.id);
-          showToast('Check-in submitted! Awaiting staff approval.', 'info');
-          form.reset();
-          showPatientView('tracker');
-          renderTrackerUI(tok);
-        } else {
-          showToast('Could not submit check-in request.', 'warning');
-        }
-      } catch (err) {
-        hideLoadingOverlay();
-        console.error('Request token error:', err);
-      }
-    });
+    if (token.status === 'pending_approval' || token.status === 'on_hold') {
+      container.innerHTML = renderPendingTracker(token);
+    } else if (token.status === 'rejected') {
+      container.innerHTML = renderRejectedTracker(token);
+    } else {
+      container.innerHTML = renderActiveTracker(token);
+    }
   }
-});
+
+  async function handleTokenRequest(event) {
+    event.preventDefault();
+
+    const form = event.currentTarget;
+    const errorElement = byId('p-tf-error');
+    const name = byId('p-tf-name').value.trim();
+    const phone = byId('p-tf-phone').value.trim();
+    const departmentId = byId('p-tf-department').value;
+
+    if (!name || !/^\d{10}$/.test(phone) || !departmentId) {
+      showFormError(errorElement, 'Enter your name and a valid 10-digit contact number.');
+      return;
+    }
+
+    if (!state.selectedHospital) {
+      showFormError(errorElement, 'Please select a hospital before requesting a token.');
+      return;
+    }
+
+    clearFormError(errorElement);
+    showLoading('Generating your token…');
+
+    try {
+      const token = await api.post('/tokens', {
+        hospital_id: state.selectedHospital.id,
+        department_id: departmentId,
+        patient_name: name,
+        age: 0,
+        gender: 'Not specified',
+        phone,
+      });
+
+      state.myTokenId = token.id;
+      state.myToken = token;
+      localStorage.setItem(TOKEN_STORAGE_KEY, token.id);
+      showToast(`Token ${token.number} created successfully.`, 'success');
+      form.reset();
+      renderTracker(token);
+      updateTokenNavigation(token);
+      showPatientView('tracker');
+    } catch (error) {
+      console.error('Token request failed.', error);
+      showToast(error.message || 'Could not submit the check-in request.', 'warning');
+    } finally {
+      hideLoading();
+    }
+  }
+
+  function handleWebSocketEvent(message) {
+    const event = message.event;
+    const data = message.data || {};
+    const isMyToken = state.myTokenId && data.token_id === state.myTokenId;
+
+    if (event === 'token_approved' && isMyToken) {
+      showToast(`Your token request has been approved! Assigned Number: ${data.number}`, 'success');
+      fetchAndRenderToken(state.myTokenId);
+      return;
+    }
+
+    if (event === 'token_rejected' && isMyToken) {
+      showToast('Your token request was not approved.', 'warning');
+      fetchAndRenderToken(state.myTokenId);
+      return;
+    }
+
+    if (event === 'token_held' && isMyToken) {
+      showToast('Your token request has been kept on hold by reception.', 'info');
+      fetchAndRenderToken(state.myTokenId);
+      return;
+    }
+
+    if (event === 'token_called' && isMyToken) {
+      showToast(`🔔 It is your turn! Token ${data.token_number} is called at counter.`, 'success');
+      fetchAndRenderToken(state.myTokenId);
+      return;
+    }
+
+    if (event === 'patient_alert' && isMyToken) {
+      showToast('⚠️ Get ready! You are next in line.', 'warning');
+      fetchAndRenderToken(state.myTokenId);
+      return;
+    }
+
+    if (event === 'queue_update') {
+      if (state.myTokenId) fetchAndRenderToken(state.myTokenId);
+      if (state.selectedHospital?.id === data.hospital_id) {
+        loadHospitalDetails(data.hospital_id, true)
+          .then((hospital) => {
+            state.selectedHospital = hospital;
+            renderHospitalDetails(hospital);
+          })
+          .catch((error) => console.error('Live hospital refresh failed.', error));
+      }
+    }
+  }
+
+  function handlePortalClick(event) {
+    const viewButton = event.target.closest('[data-patient-view]');
+    if (viewButton) {
+      const viewName = viewButton.dataset.patientView;
+      showPatientView(viewName);
+      if (viewName === 'tracker' && state.myTokenId) fetchAndRenderToken(state.myTokenId);
+      return;
+    }
+
+    const tokenButton = event.target.closest('[data-token-department]');
+    if (tokenButton) {
+      openTokenForm(tokenButton.dataset.tokenHospital, tokenButton.dataset.tokenDepartment);
+      return;
+    }
+
+    const hospitalCard = event.target.closest('[data-hospital-id]');
+    if (hospitalCard) selectHospital(hospitalCard.dataset.hospitalId);
+  }
+
+  function handlePortalKeydown(event) {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const hospitalCard = event.target.closest('[data-hospital-id]');
+    if (!hospitalCard) return;
+
+    event.preventDefault();
+    selectHospital(hospitalCard.dataset.hospitalId);
+  }
+
+  async function initializePatientPortal() {
+    byId('p-token-form')?.addEventListener('submit', handleTokenRequest);
+    byId('p-hospital-search')?.addEventListener('input', renderHospitals);
+    document.addEventListener('click', handlePortalClick);
+    document.addEventListener('keydown', handlePortalKeydown);
+    connectWebSocket(handleWebSocketEvent, 'Patient');
+
+    try {
+      await fetchHospitals();
+    } catch (error) {
+      console.error('Unable to load hospitals.', error);
+      showToast(error.message || 'Could not load hospitals.', 'warning');
+    }
+
+    const requestedHospitalId = new URLSearchParams(window.location.search).get('hospital');
+
+    if (requestedHospitalId && state.hospitals.some((hospital) => hospital.id === requestedHospitalId)) {
+      await selectHospital(requestedHospitalId);
+    } else if (state.myTokenId) {
+      showPatientView('tracker');
+      await fetchAndRenderToken(state.myTokenId);
+    } else {
+      showPatientView('hospitals');
+    }
+  }
+
+  window.showPatientView = showPatientView;
+  window.selectHospital = selectHospital;
+  window.openTokenForm = openTokenForm;
+
+  document.addEventListener('DOMContentLoaded', initializePatientPortal);
+}());

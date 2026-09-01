@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import datetime as dt
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -65,6 +67,32 @@ def get_pending_tokens(
     return [crud.token_to_out(db, t) for t in tokens]
 
 
+@router.get("/lookup", response_model=schemas.TokenOut)
+def lookup_token(
+    hospital_id: str = Query(..., min_length=1),
+    department_id: str = Query(..., min_length=1),
+    token_number: str = Query(..., min_length=1),
+    db: Session = Depends(get_db),
+):
+    """Find a digital token using its hospital, department, and displayed number."""
+    normalized_number = token_number.strip().upper()
+    token = db.scalars(
+        select(models.Token)
+        .where(
+            models.Token.hospital_id == hospital_id,
+            models.Token.department_id == department_id,
+            models.Token.number == normalized_number,
+        )
+        .order_by(models.Token.created_at.desc())
+        .limit(1)
+    ).first()
+
+    if not token:
+        raise HTTPException(status_code=404, detail="No token matches those details")
+
+    return crud.token_to_out(db, token)
+
+
 @router.post("/{token_id}/approve", response_model=schemas.TokenOut)
 async def approve_token_request(token_id: str, db: Session = Depends(get_db)):
     """
@@ -76,7 +104,7 @@ async def approve_token_request(token_id: str, db: Session = Depends(get_db)):
     if not token:
         raise HTTPException(status_code=404, detail="Token not found")
 
-    if token.status != "pending_approval":
+    if token.status not in {"pending_approval", "on_hold"}:
         raise HTTPException(
             status_code=400,
             detail=f"Token is in status '{token.status}' and cannot be approved",
@@ -113,6 +141,33 @@ async def approve_token_request(token_id: str, db: Session = Depends(get_db)):
             },
         )
 
+    return out
+
+
+@router.post("/{token_id}/hold", response_model=schemas.TokenOut)
+async def hold_token_request(token_id: str, db: Session = Depends(get_db)):
+    """Keep a new request out of the live queue until staff approves it."""
+    token = crud.get_token(db, token_id)
+    if not token:
+        raise HTTPException(status_code=404, detail="Token not found")
+
+    if token.status != "pending_approval":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Token is in status '{token.status}' and cannot be held",
+        )
+
+    held = crud.hold_token(db, token)
+    out = crud.token_to_out(db, held)
+    await manager.broadcast(
+        "token_held",
+        {
+            "token_id": held.id,
+            "hospital_id": held.hospital_id,
+            "department_id": held.department_id,
+            "patient_name": held.patient_name,
+        },
+    )
     return out
 
 
@@ -197,7 +252,8 @@ def list_tokens(
     hospital_id: str | None = Query(None, description="Filter by hospital ID"),
     department_id: str | None = Query(None, description="Filter by department ID"),
     status: str | None = Query(None, description="Filter by status (waiting, called, completed, etc.)"),
-    limit: int = Query(25, ge=1, le=100),
+    today_only: bool = Query(False, description="Return only tokens created today in server-local time"),
+    limit: int = Query(25, ge=1, le=500),
     db: Session = Depends(get_db),
 ):
     """List recent tokens for reception and tracking."""
@@ -208,6 +264,20 @@ def list_tokens(
         stmt = stmt.where(models.Token.department_id == department_id)
     if status:
         stmt = stmt.where(models.Token.status == status)
+    if today_only:
+        local_now = dt.datetime.now().astimezone()
+        local_midnight = dt.datetime.combine(
+            local_now.date(),
+            dt.time.min,
+            tzinfo=local_now.tzinfo,
+        )
+        next_midnight = local_midnight + dt.timedelta(days=1)
+        start_utc = local_midnight.astimezone(dt.timezone.utc).replace(tzinfo=None)
+        end_utc = next_midnight.astimezone(dt.timezone.utc).replace(tzinfo=None)
+        stmt = stmt.where(
+            models.Token.created_at >= start_utc,
+            models.Token.created_at < end_utc,
+        )
 
     tokens = list(db.scalars(stmt.limit(limit)))
     return [crud.token_to_out(db, t) for t in tokens]

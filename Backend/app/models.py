@@ -9,7 +9,7 @@ expects to render.
 
 import datetime as dt
 
-from sqlalchemy import String, Integer, Float, DateTime, ForeignKey
+from sqlalchemy import Boolean, String, Integer, Float, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -25,6 +25,16 @@ class Hospital(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     location: Mapped[str] = mapped_column(String, nullable=False)
+    city: Mapped[str | None] = mapped_column(String, nullable=True)
+    district: Mapped[str | None] = mapped_column(String, nullable=True)
+    region: Mapped[str | None] = mapped_column(String, nullable=True)
+    hospital_tier: Mapped[str | None] = mapped_column(String, nullable=True)
+    emergency_24x7: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    total_doctors: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_inpatient_beds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_opd_consultation_rooms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    daily_opd_token_capacity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    department_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     departments: Mapped[list["Department"]] = relationship(
         back_populates="hospital", cascade="all, delete-orphan"
@@ -74,7 +84,7 @@ class Token(Base):
     gender: Mapped[str] = mapped_column(String, nullable=False)
     phone: Mapped[str] = mapped_column(String, nullable=False)
 
-    # pending_approval -> waiting -> called -> completed | skipped | noshow | rejected
+    # pending_approval -> on_hold | waiting -> called -> completed | skipped | noshow | rejected
     status: Mapped[str] = mapped_column(String, default="pending_approval")
     queue_position: Mapped[int] = mapped_column(Integer, default=0)  # explicit FIFO order
 

@@ -4,19 +4,19 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>OPD Queue &amp; Bed Availability System</title>
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="./style.css">
 </head>
 <body>
 
   <header class="app-header">
     <div class="container header-inner">
-      <a href="/" class="logo-btn" style="text-decoration:none;">
+      <a href="./index.html" class="logo-btn" style="text-decoration:none;">
         <span class="logo-mark" aria-hidden="true">＋</span>
         <span class="logo-text">OPD Queue &amp; Bed System</span>
       </a>
       <nav class="header-nav" aria-label="Main navigation">
-        <a href="/patient" class="nav-link" style="text-decoration:none;">Patient Portal</a>
-        <a href="/staff" class="nav-link" style="text-decoration:none;">Staff Portal</a>
+        <a href="./patient.html" class="nav-link" style="text-decoration:none;">Patient Portal</a>
+        <a href="./hospital_login.html" class="nav-link" style="text-decoration:none;">Hospital Portal</a>
       </nav>
     </div>
   </header>
@@ -24,47 +24,75 @@
   <main>
     <section class="container" style="padding-top: 40px; padding-bottom: 60px;">
       <div class="hero">
-        <p class="eyebrow">SIH1620 · Outpatient Department Optimization</p>
         <h1>Smart OPD Queuing &amp; Bed Availability System</h1>
         <p class="hero-sub">
-          Skip the crowded waiting room. Model patient flow with real-time $M/M/c$ queuing theory, get verified digital tokens, track your turn live, and monitor ward beds across hospitals.
+          Avoid crowded waiting rooms. Get a digital token, follow your turn, and check available beds.
         </p>
         <div class="hero-actions">
-          <a href="/patient" class="btn btn-primary btn-lg" style="text-decoration:none;">I'm a Patient →</a>
-          <a href="/staff" class="btn btn-outline btn-lg" style="text-decoration:none;">Staff Portal Login 🔒</a>
+          <a href="./patient.html" id="patient-entry-btn" class="btn btn-primary btn-lg" style="text-decoration:none;">I'm a Patient →</a>
+          <a href="./hospital_login.html" class="btn btn-outline btn-lg" style="text-decoration:none;">Hospital Portal Login 🔒</a>
         </div>
       </div>
 
       <div class="feature-grid" role="list" style="margin-top: 50px;">
-        <div class="feature-card" role="listitem">
+        <a class="feature-card feature-card-link" role="listitem" href="./token_lookup.html">
           <div class="feature-icon" aria-hidden="true">🎫</div>
           <h3>Digital Token Approvals</h3>
-          <p>Patients submit digital check-ins from their phone. Reception staff approve requests in real time to prevent duplicate queues.</p>
-        </div>
-        <div class="feature-card" role="listitem">
+          <p>Request a token by phone. Hospital staff review it and add you to the queue.</p>
+          <span class="feature-card-cta">Find your approved token →</span>
+        </a>
+        <a class="feature-card feature-card-link" role="listitem" href="./wait_times.html">
           <div class="feature-icon" aria-hidden="true">⏱️</div>
-          <h3>Erlang-C Wait Times</h3>
-          <p>Queuing theory models expected wait times based on live arrival rates ($\lambda$) and service rates ($\mu$) per counter.</p>
-        </div>
-        <div class="feature-card" role="listitem">
+          <h3>Clear Wait Times</h3>
+          <p>See how long you may wait and how many patients are ahead of you.</p>
+          <span class="feature-card-cta">Check wait times →</span>
+        </a>
+        <a class="feature-card feature-card-link" role="listitem" href="./bed_availability.html">
           <div class="feature-icon" aria-hidden="true">🛏️</div>
           <h3>Live Bed Availability</h3>
-          <p>Real-time visibility into occupied, available, cleaning, and maintenance beds across all emergency and general wards.</p>
-        </div>
-        <div class="feature-card" role="listitem">
+          <p>Quickly see which hospital beds are available or occupied.</p>
+          <span class="feature-card-cta">Check hospital beds →</span>
+        </a>
+        <a class="feature-card feature-card-link" role="listitem" href="./crowd_predictions.html">
           <div class="feature-icon" aria-hidden="true">⚠️</div>
-          <h3>Predictive Capacity Alerts</h3>
-          <p>Early warning projections for hospital administration before OPD departments hit congestion thresholds.</p>
-        </div>
+          <h3>Crowd Predictions</h3>
+          <p>Staff get an early warning when a department may become too busy.</p>
+          <span class="feature-card-cta">View predictions →</span>
+        </a>
       </div>
     </section>
   </main>
 
+  <div id="hospital-finder-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="hospital-finder-title">
+    <div class="modal hospital-finder-modal">
+      <button id="close-hospital-finder" class="modal-close" aria-label="Close hospital finder">✕</button>
+      <p class="eyebrow">Find care near you</p>
+      <h2 id="hospital-finder-title">Choose a hospital</h2>
+      <p class="section-sub">Use your location or search by hospital, landmark, or city.</p>
+
+      <button id="use-location-btn" class="btn btn-primary btn-block" type="button">
+        📍 Use my live location
+      </button>
+
+      <div class="finder-divider"><span>or search</span></div>
+
+      <div class="field">
+        <label for="hospital-search-input">Hospital, landmark, or city</label>
+        <input id="hospital-search-input" class="input" type="search" placeholder="Try Salt Lake, Howrah, or a hospital name" autocomplete="off">
+      </div>
+
+      <p id="hospital-finder-status" class="finder-status" aria-live="polite">Loading hospitals…</p>
+      <div id="hospital-finder-results" class="finder-results"></div>
+    </div>
+  </div>
+
   <footer class="app-footer">
     <div class="container">
-      <p>OPD Queuing &amp; Bed System · SIH1620 Public Healthcare Optimization</p>
+      <p>OPD Queuing &amp; Bed System · Public Healthcare Optimization</p>
     </div>
   </footer>
+
+  <script src="./script.js"></script>
 
 </body>
 </html>

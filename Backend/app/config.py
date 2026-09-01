@@ -11,9 +11,9 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Backen
 DB_PATH = os.path.join(BASE_DIR, "opd_system.db")
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
-# --- Staff auth (demo only, matches the frontend hint text) -----------
-STAFF_USERNAME = "staff"
-STAFF_PASSWORD = "staff123"
+# --- Hospital portal auth (demo only, matches the frontend hint text) -
+HOSPITAL_USERNAME = "staff"
+HOSPITAL_PASSWORD = "staff123"
 
 # --- Queuing engine defaults --------------------------------------------
 # If a department has too few real observations yet, these seed the

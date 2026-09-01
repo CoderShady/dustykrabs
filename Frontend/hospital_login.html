@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hospital Portal Login · OPD Queuing System</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+
+  <!-- Toasts -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <header class="app-header">
+    <div class="container header-inner">
+      <a href="./index.html" class="logo-btn" style="text-decoration:none;">
+        <span class="logo-mark" aria-hidden="true">＋</span>
+        <span class="logo-text">OPD Queue &amp; Bed System</span>
+      </a>
+      <nav class="header-nav" aria-label="Main navigation">
+        <a href="./index.html" class="nav-link" style="text-decoration:none;">Home</a>
+        <a href="./patient.html" class="nav-link" style="text-decoration:none;">Patient Portal</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="container narrow" style="padding-top: 50px; padding-bottom: 60px;">
+      <a href="./index.html" class="link-back" style="text-decoration:none; display:inline-block; margin-bottom:16px;">← Back to Home</a>
+      <h2>Hospital Portal Login</h2>
+      <p class="section-sub">Hospitals can sign in to manage queues and beds.</p>
+
+      <form id="hospital-login-form" class="card form-card" novalidate style="margin-top:20px;">
+        <div id="hospital-login-error" class="form-error hidden" role="alert" style="margin-bottom:16px;"></div>
+
+        <div class="field">
+          <label for="hospital-username">Username</label>
+          <input type="text" id="hospital-username" class="input" autocomplete="username" required placeholder="staff" value="staff">
+        </div>
+        <div class="field">
+          <label for="hospital-password">Password</label>
+          <input type="password" id="hospital-password" class="input" autocomplete="current-password" required placeholder="••••••••" value="staff123">
+        </div>
+
+        <button type="submit" id="hospital-login-btn" class="btn btn-primary btn-block btn-lg" style="margin-top:20px;">
+          Log In to Dashboard →
+        </button>
+
+        <p class="form-help" style="margin-top:14px; text-align:center;">
+          Demo credentials: <strong>staff</strong> / <strong>staff123</strong>
+        </p>
+      </form>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <div class="container">
+      <p>OPD Queuing &amp; Bed System · Authorized Access Portal</p>
+    </div>
+  </footer>
+
+  <script src="./script.js"></script>
+</body>
+</html>
